@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package observex.common.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/Voxmatic/observe/internal/api/observex/common/v1;commonv1";
+
+// Stamp carries both clocks for one recorded change. See
+// docs/adr/0006-two-clocks.md.
+message Stamp {
+  // When the change happened in the monitored system.
+  google.protobuf.Timestamp valid_time = 1;
+  // When ObserveX recorded the change.
+  google.protobuf.Timestamp record_time = 2;
+}
+
+// EntityRef points at one monitored entity.
+message EntityRef {
+  // Stable entity identifier, for example "service:checkout".
+  string id = 1;
+  // Entity type, for example "service", "host", "pod", "database".
+  string type = 2;
+}
+
+// AgentIdentity names the sender of a batch.
+message AgentIdentity {
+  // Assigned at enrollment; also the common name of the agent's certificate.
+  string agent_id = 1;
+  string hostname = 2;
+  // Agent build version, for example "0.1.0".
+  string version = 3;
+}

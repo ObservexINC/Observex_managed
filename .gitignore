@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# Fuzz caches stay local; seed corpora live in testdata/fuzz
+/.cache/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Never commit local secrets or certificates
+*.pem
+*.key
+!**/testdata/**/*.pem
+.env
+.env.*

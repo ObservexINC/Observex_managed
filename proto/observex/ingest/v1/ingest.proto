@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package observex.ingest.v1;
+
+import "observex/common/v1/common.proto";
+
+option go_package = "github.com/Voxmatic/observe/internal/api/observex/ingest/v1;ingestv1";
+
+// IngestService carries telemetry batches from Agents to Gateways and from
+// Gateways to the Server's Intake.
+//
+// The meaning of an acknowledgement is governed by DR-07 and DR-08, which are
+// not yet approved. Until they are, these messages fix only the identifiers a
+// receiver needs to drop repeats (agent ID, sequence number, batch ID); no
+// durable-delivery behaviour is implemented.
+service IngestService {
+  // Send delivers one batch and returns its acknowledgement.
+  rpc Send(SendRequest) returns (SendResponse);
+}
+
+// Signal names the kind of telemetry inside a batch.
+enum Signal {
+  SIGNAL_UNSPECIFIED = 0;
+  SIGNAL_METRICS = 1;
+  SIGNAL_LOGS = 2;
+  SIGNAL_TRACES = 3;
+  SIGNAL_EVENTS = 4;
+  SIGNAL_PROFILES = 5;
+}
+
+// Batch is one unit of delivery.
+message Batch {
+  observex.common.v1.AgentIdentity sender = 1;
+  // Increases by one for every batch a sender creates. Gaps show loss.
+  uint64 sequence = 2;
+  // Random 16-byte identifier, unique per batch, used to drop repeats.
+  bytes batch_id = 3;
+  Signal signal = 4;
+  // An OTLP export request, protobuf-encoded, for the batch's signal.
+  bytes otlp_payload = 5;
+  // Number of records inside the payload, for quotas and loss accounting.
+  uint32 record_count = 6;
+}
+
+message SendRequest {
+  Batch batch = 1;
+}
+
+// AckStatus values are placeholders until DR-07 and DR-08 define them.
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  // Accepted by the receiver. Its durability meaning is defined by DR-07/08.
+  ACK_STATUS_ACCEPTED = 1;
+  // Rejected because the batch is malformed; the sender must not retry.
+  ACK_STATUS_REJECTED = 2;
+  // Refused for now (quota, overload); the sender may retry later.
+  ACK_STATUS_RETRY_LATER = 3;
+  // Already received; the sender can treat it as accepted.
+  ACK_STATUS_DUPLICATE = 4;
+}
+
+message SendResponse {
+  bytes batch_id = 1;
+  AckStatus status = 2;
+  // Human-readable reason for REJECTED or RETRY_LATER. Never contains data
+  // from the batch.
+  string reason = 3;
+  // Suggested wait before retrying, in milliseconds, for RETRY_LATER.
+  uint32 retry_after_ms = 4;
+}

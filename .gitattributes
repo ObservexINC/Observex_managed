@@ -1,0 +1,5 @@
+# Keep LF line endings on every platform, so gofmt and buf format checks give
+# the same answer on Windows as on Linux.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

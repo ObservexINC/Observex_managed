@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go build and tests (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.27 is the target toolchain (T1). 1.24 is the language level in
+        # go.mod and the toolchain in the development workspace.
+        go: ["1.27.x", "1.24.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+      - name: Format, vet, build, race tests, coverage
+        run: make ci-local
+      - name: Fuzz (time-boxed)
+        run: make fuzz FUZZTIME=30s
+
+  checks:
+    name: Lint, vulnerabilities, secrets, licences, schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          check-latest: true
+      # Tools are installed through the Go module proxy with checksum
+      # verification. Versions are unpinned until the first green run;
+      # pinning them is a G01 follow-up recorded in the G00 handoff.
+      - name: Install tools
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install github.com/zricethezav/gitleaks/v8@latest
+          go install github.com/google/go-licenses@latest
+          go install github.com/bufbuild/buf/cmd/buf@latest
+      - name: Lint
+        run: make lint
+      - name: Vulnerabilities
+        run: make vuln
+      - name: Secrets
+        run: make secrets
+      - name: Licences
+        run: make licenses
+      - name: Protobuf lint and format
+        run: make proto-lint

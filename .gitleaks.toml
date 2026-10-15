@@ -1,0 +1,12 @@
+title = "ObserveX gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# One exception: the invented secrets that the logging leak test uses as
+# fixtures. Nothing else may be added to that file (see its header).
+[allowlist]
+description = "Invented secrets used only as redaction test fixtures"
+paths = [
+  '''^internal/platform/logging/secrets_fixture_test\.go$''',
+]

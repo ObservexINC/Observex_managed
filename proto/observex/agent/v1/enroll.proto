@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package observex.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+import "observex/common/v1/common.proto";
+
+option go_package = "github.com/Voxmatic/observe/internal/api/observex/agent/v1;agentv1";
+
+// EnrollmentService turns a one-time enrollment token into a client
+// certificate, and later serves signed configuration. See
+// docs/adr/0008-tls-identity-and-enrollment.md.
+service EnrollmentService {
+  // Enroll is the only call allowed without a client certificate. It is
+  // served over server-authenticated TLS 1.3.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  // GetConfig returns the latest signed configuration for the caller.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+}
+
+message EnrollRequest {
+  // One-time token, "oxe_<id>.<secret>". Never logged.
+  string token = 1;
+  // PKCS#10 certificate signing request, DER-encoded. The private key never
+  // leaves the host.
+  bytes csr_der = 2;
+  string hostname = 3;
+  string agent_version = 4;
+}
+
+message EnrollResponse {
+  observex.common.v1.AgentIdentity identity = 1;
+  // Issued certificate followed by intermediates, DER-encoded.
+  repeated bytes certificate_chain_der = 2;
+  // Trust anchors for verifying Gateways and nodes, DER-encoded.
+  repeated bytes ca_certificates_der = 3;
+  google.protobuf.Timestamp not_after = 4;
+  // Ed25519 public key that signs configuration documents.
+  bytes config_signing_key = 5;
+}
+
+message GetConfigRequest {
+  // Revision the caller already has; the server may answer "unchanged".
+  int64 known_revision = 1;
+}
+
+message GetConfigResponse {
+  int64 revision = 1;
+  bool unchanged = 2;
+  // Configuration document, JSON.
+  bytes document = 3;
+  // Ed25519 signature over document.
+  bytes signature = 4;
+}
