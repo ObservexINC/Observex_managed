@@ -4,7 +4,7 @@ package observex.common.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/Voxmatic/observe/internal/api/observex/common/v1;commonv1";
+option go_package = "github.com/ObservexINC/Observex_managed/internal/api/observex/common/v1;commonv1";
 
 // Stamp carries both clocks for one recorded change. See
 // docs/adr/0006-two-clocks.md.

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // TraceStore is an in-memory store.TraceStore.

@@ -4,7 +4,7 @@ package observex.ingest.v1;
 
 import "observex/common/v1/common.proto";
 
-option go_package = "github.com/Voxmatic/observe/internal/api/observex/ingest/v1;ingestv1";
+option go_package = "github.com/ObservexINC/Observex_managed/internal/api/observex/ingest/v1;ingestv1";
 
 // IngestService carries telemetry batches from Agents to Gateways and from
 // Gateways to the Server's Intake.

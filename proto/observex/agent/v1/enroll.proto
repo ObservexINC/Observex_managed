@@ -5,7 +5,7 @@ package observex.agent.v1;
 import "google/protobuf/timestamp.proto";
 import "observex/common/v1/common.proto";
 
-option go_package = "github.com/Voxmatic/observe/internal/api/observex/agent/v1;agentv1";
+option go_package = "github.com/ObservexINC/Observex_managed/internal/api/observex/agent/v1;agentv1";
 
 // EnrollmentService turns a one-time enrollment token into a client
 // certificate, and later serves signed configuration. See

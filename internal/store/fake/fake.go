@@ -7,7 +7,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // lifecycle tracks Close and context cancellation for every fake.

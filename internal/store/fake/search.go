@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // SearchStore is an in-memory store.SearchStore.

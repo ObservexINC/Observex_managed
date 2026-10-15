@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // ConfigStore is an in-memory store.ConfigStore with a store-wide revision

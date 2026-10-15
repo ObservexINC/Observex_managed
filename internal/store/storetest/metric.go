@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // MetricStore runs the MetricStore contract against stores from open.

@@ -8,10 +8,12 @@ OD-26 as approved until akash records it in the approval log of record.
 
 | Date | Direction, in akash's words where available |
 | --- | --- |
-| 14 Oct 2026 | "we are not migrating now we are building from scratch". ObserveX Managed is built in the new repository Voxmatic/observe, on the customer's own premises or cloud. |
+| 14 Oct 2026 | "we are not migrating now we are building from scratch". ObserveX Managed is built in a new repository, on the customer's own premises or cloud. |
 | 15 Oct 2026, 10:11 | ObserveX serves all sectors, not only banking; it is an AI-native full-stack observability platform for Managed environments; every feature, including akash's own suggestions, is judged on its merit. |
 | 15 Oct 2026, 11:26 | Plan all phases first; write code together with test cases; build each module first; middleware in Go; Claude proposes other technologies for akash's approval. |
 | 15 Oct 2026, 11:39 | "now i approved implementiation and ask me when you think necessary". |
+| 15 Oct 2026, 12:17 | The repository of record is the private repository ObservexINC/Observex_managed; akash pushed G00 to its main branch himself (49b834e). |
+| 15 Oct 2026, 12:31 | "i have push all above current file so we can proceed with next step"; parts of the earlier codebase (Documents/observex) may be reused where useful. |
 
 ## 2. What this supersedes
 
@@ -54,6 +56,6 @@ These items belong to Voxmatic/observex. None has code in the new repository.
 | 3 | Accept Go language level 1.24 in `go.mod` until the workspace can reach the module proxy? | Accept; CI tests 1.27 and 1.24 | |
 | 4 | Allow proxy.golang.org and sum.golang.org in Claude's network settings? | Yes, needed for Go 1.27, dependencies and tools | |
 | 5 | ObserveX's own licence | akash's commercial choice; none set until then | |
-| 6 | Where the approval log of record lives for the new repository | `docs/governance/record/approval-log.md` in Voxmatic/observe, append-only | |
+| 6 | Where the approval log of record lives for the new repository | `docs/governance/record/approval-log.md` in ObservexINC/Observex_managed, append-only | |
 | 7 | Delivery of each goal: git bundle only, or also a push to a branch | Bundle now; push to a branch per goal once akash allows push access | |
 | 8 | Default for sending telemetry to an external AI model | Forbidden by default; customer can enable per environment | |

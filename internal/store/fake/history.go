@@ -4,8 +4,8 @@ import (
 	"context"
 	"sort"
 
-	"github.com/Voxmatic/observe/internal/platform/clock"
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/platform/clock"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // HistoryStore is an in-memory, append-only store.HistoryStore.

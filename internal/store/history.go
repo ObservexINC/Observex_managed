@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/platform/clock"
+	"github.com/ObservexINC/Observex_managed/internal/platform/clock"
 )
 
 // EntityID identifies a monitored entity: a host, process, service, pod,

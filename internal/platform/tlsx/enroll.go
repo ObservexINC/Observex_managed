@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/platform/logging"
+	"github.com/ObservexINC/Observex_managed/internal/platform/logging"
 )
 
 // TokenPrefix starts every enrollment token, so scanners and people recognise

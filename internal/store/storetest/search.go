@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // SearchStore runs the SearchStore contract against stores from open.

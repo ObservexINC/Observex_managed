@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // ConfigStore runs the ConfigurationStore contract against stores from open.

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/platform/tlsx"
-	"github.com/Voxmatic/observe/internal/platform/tlsx/tlstest"
+	"github.com/ObservexINC/Observex_managed/internal/platform/tlsx"
+	"github.com/ObservexINC/Observex_managed/internal/platform/tlsx/tlstest"
 )
 
 const serverName = "node-1.observex.test"

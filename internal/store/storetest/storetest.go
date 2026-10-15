@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // T0 is the fixed start time used by every suite.

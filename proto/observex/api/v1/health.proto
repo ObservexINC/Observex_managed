@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package observex.api.v1;
 
-option go_package = "github.com/Voxmatic/observe/internal/api/observex/api/v1;apiv1";
+option go_package = "github.com/ObservexINC/Observex_managed/internal/api/observex/api/v1;apiv1";
 
 // HealthService reports whether a process is ready. Every ObserveX process
 // serves it; the Node Supervisor and NGINX Front Door use it.

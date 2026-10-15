@@ -1,4 +1,4 @@
-module github.com/Voxmatic/observe
+module github.com/ObservexINC/Observex_managed
 
 // Language level 1.24 so the code builds with the Go 1.24.7 toolchain in the
 // development workspace, where the module proxy is not reachable. CI and

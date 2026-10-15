@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/platform/clock"
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/platform/clock"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // HistoryStore runs the System History contract against stores from open.

@@ -3,9 +3,9 @@ package fake_test
 import (
 	"testing"
 
-	"github.com/Voxmatic/observe/internal/store"
-	"github.com/Voxmatic/observe/internal/store/fake"
-	"github.com/Voxmatic/observe/internal/store/storetest"
+	"github.com/ObservexINC/Observex_managed/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store/fake"
+	"github.com/ObservexINC/Observex_managed/internal/store/storetest"
 )
 
 // Every fake must pass the same contract suite as the real adapters.

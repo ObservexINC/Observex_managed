@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/platform/clock"
+	"github.com/ObservexINC/Observex_managed/internal/platform/clock"
 )
 
 var t0 = time.Date(2026, 10, 17, 2, 0, 0, 0, time.UTC)

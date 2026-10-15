@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // BaselineStore runs the BaselineStore contract against stores from open.

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 
-	"github.com/Voxmatic/observe/internal/store"
+	"github.com/ObservexINC/Observex_managed/internal/store"
 )
 
 // BaselineStore is an in-memory store.BaselineStore.
