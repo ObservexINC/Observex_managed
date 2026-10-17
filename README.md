@@ -9,14 +9,23 @@ ConfigurationStore, EntityStore, BaselineStore).
 
 ## Status
 
-Goal G00, architecture baseline. This repository holds the foundations that
-every later module builds on:
+Goals G00 (architecture baseline) and G01 (node platform) are built. G01's
+node runs the Node Supervisor, the NGINX Front Door and self-monitoring, and
+installs from a tarball (`packaging/linux/README.md`).
 
 | Path | What it is |
 | --- | --- |
+| `cmd/observex-node` | The node command: `run`, `check`, `firewall`, `status`, `health`, `render-nginx`, `init`, `version` |
+| `internal/node` | Node configuration and assembly (ADR 0010) |
+| `internal/node/supervisor` | Node Supervisor: start order, readiness, restarts with backoff, crash loops, clean stop |
+| `internal/node/frontdoor` | NGINX Front Door configuration: TLS 1.3, Console and Agents listeners, fixed routes |
+| `internal/node/firewall` | Read-only firewall report; never changes the firewall |
+| `internal/node/selfmon` | The node's own metrics on loopback `/metrics` (ADR 0009) |
+| `internal/node/pki` | First-install cluster CA and node certificate (interim, ADR 0010) |
+| `packaging/linux` | systemd unit, `install.sh`, `uninstall.sh`, install test |
 | `internal/platform/clock` | Valid time and record time on every change (ADR 0006) |
 | `internal/platform/logging` | Logging that redacts secrets, with a leak test (ADR 0007) |
-| `internal/platform/config` | Strict configuration loading and Ed25519 signatures |
+| `internal/platform/config` | Strict configuration loading, durations, Ed25519 signatures |
 | `internal/platform/tlsx` | TLS 1.3 mutual TLS with hybrid post-quantum key exchange, enrollment tokens (ADR 0008) |
 | `internal/store` | The six store interfaces (ADR 0004) |
 | `internal/store/storetest` | Contract test suites every store adapter must pass |
@@ -25,19 +34,22 @@ every later module builds on:
 | `docs/adr` | Architecture decision records (Proposed until akash accepts them) |
 | `docs/security/threat-model.md` | Threat model |
 | `docs/governance/drafts` | Drafts for akash's approval log; nothing there is approved |
+| `docs/handoff` | Each goal's handoff to Astra |
 
-No server, agent or gateway binary exists yet. They arrive in Phase 1 (G01 to
-G05), each module tested on its own before integration.
+The Server, Gateway, Agent and stores come next (G02 to G05), each module
+tested on its own before integration (G06).
 
 ## Build and test
 
-Requires Go 1.24 or later; releases use Go 1.27. G00 uses only the standard
-library, so nothing is downloaded.
+Requires Go 1.24 or later; releases use Go 1.27. The code uses only the
+standard library, so nothing is downloaded. The Front Door tests need NGINX
+(`apt-get install nginx-core`); without it they skip.
 
 Linux, macOS or WSL2:
 
 ```sh
-make ci-local          # gofmt check, vet, build, race tests, coverage
+make ci-local          # gofmt check, vet, build, race tests, coverage, shell syntax
+make install-test      # build the node tarball and install it under a temporary root
 make fuzz FUZZTIME=30s # each fuzz target for 30 seconds
 make ci                # adds golangci-lint, govulncheck, gitleaks, go-licenses, buf
 ```

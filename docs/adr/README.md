@@ -14,5 +14,7 @@ to **Accepted** or **Rejected**.
 | [0006](0006-two-clocks.md) | Two clocks on every recorded change | Proposed |
 | [0007](0007-logging-and-secret-redaction.md) | Logging and secret redaction | Proposed |
 | [0008](0008-tls-identity-and-enrollment.md) | TLS, identity and enrollment | Proposed |
+| [0009](0009-self-monitoring-exposition.md) | Node self-monitoring without the OpenTelemetry SDK at G01 | Proposed |
+| [0010](0010-managed-node-g01.md) | The managed node at G01: components, ports, TLS and installer | Proposed |
 
 Format: context, decision, consequences, and what would change the decision.

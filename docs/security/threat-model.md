@@ -1,6 +1,7 @@
 # ObserveX Managed threat model
 
-Status: Proposed, G00 baseline. Revised at the end of every goal that adds a
+Status: Proposed. G00 baseline, revised for G01 (the node: Front Door,
+Node Supervisor, installer). Revised at the end of every goal that adds a
 trust boundary or an entry point.
 
 Method: STRIDE (spoofing, tampering, repudiation, information disclosure,
@@ -54,7 +55,8 @@ injection for the AI features. "Where" names the goal that builds the control;
 | --- | --- | --- | --- |
 | S | Rogue host poses as an Agent | One-time enrollment tokens, hashed at rest, single use under compare-and-set; per-agent certificate; mTLS | G00 (token, TLS), G04, G05 |
 | S | Rogue server poses as the cluster | Agent pins the cluster CA received at enrollment | G05 |
-| T | Telemetry or configuration altered in transit | TLS 1.3 only; configuration also signed with Ed25519 and refused unless verified | G00 |
+| T | Telemetry or configuration altered in transit | TLS 1.3 only (Front Door enforces it from G01); configuration also signed with Ed25519 and refused unless verified | G00, G01 |
+| S | A client forges the client-certificate result headers | The Front Door always sets the X-ObserveX-Client-* headers itself, overwriting anything the client sent | G01 |
 | I | Traffic recorded now, decrypted later | Hybrid post-quantum key exchange X25519MLKEM768 preferred | G00 |
 | R | Sender denies or replays a batch | Batch ID and per-sender sequence numbers; duplicates detected | G03 (needs DR-07, DR-08) |
 | D | Flood from one Agent or a stolen identity | Per-agent and per-environment quotas, request size limits, backpressure; certificate revocation | G03, G04 |
@@ -126,11 +128,25 @@ Off by default (D6). When enabled: allowlisted actions only, scoped
 credentials held by the customer, approval by a person, dry run first, audit
 record before and after, automatic stop on failure. Designed in G17.
 
-### B12 Operator shell on a node
+### B12 Operator shell on a node, and the node service
 
-The Node Supervisor checks firewall needs and never changes them (DEV-03).
-Secrets on disk are readable only by the service user. Admin actions taken
-through the shell are recorded in the audit log where the Server can see them.
+| STRIDE | Threat | Control | Where |
+| --- | --- | --- | --- |
+| E | The node service is compromised and becomes root | Runs as user `observex` with `CAP_NET_BIND_SERVICE` only, `NoNewPrivileges`, `ProtectSystem=strict`, private /tmp and devices; NGINX runs as the same unprivileged user (tested) | G01 |
+| I | The cluster CA key is read by the service or another user | Root-only file (`0600`); the node never reads it; `init` never overwrites it. Interim until the KMS/HSM design | G01, G04 |
+| I | The node key is read by other local users | `root:observex 0640` inside a `0750` directory | G01 |
+| I | A component inherits the supervisor's credentials | Components get a minimal fixed environment, never the supervisor's | G01 |
+| I | Secrets reach the journal through component output | Every component line passes through the redaction filter (ADR 0007) | G01 |
+| T | A configuration value injects NGINX directives | Every value validated against strict patterns; routes fixed in code; fuzz test on the generated file | G01 |
+| T | The installer overwrites a key or configuration in use | `install.sh` and `init` create files only when missing (exclusive create); the previous binary is kept | G01 |
+| T | Shell injection through installer arguments | Arguments checked against a strict character set before use | G01 |
+| D | A crashed NGINX leaves workers holding the ports | The supervisor kills the component's whole process group before restarting it (tested with SIGKILL) | G01 |
+| D | A crash loop hides an outage | Bounded backoff, then the component is marked failed; `/readyz`, `/health` and metrics report it | G01 |
+| R | Firewall changes are made silently | The node never changes the firewall; it runs only a fixed list of read-only commands and prints suggestions (DEV-03) | G01 |
+| I | Supervisor status or metrics are exposed to the network | Bound to loopback only (validated); the Front Door forwards `/node/health` and nothing else of the supervisor (tested) | G01 |
+
+Admin actions taken through the shell are recorded in the audit log where
+the Server can see them (G10).
 
 ## Open risks for akash
 
@@ -138,7 +154,11 @@ through the shell are recorded in the audit log where the Server can see them.
    guarantees are undefined until they are.
 2. The TraceStore keeps one copy; a failed node loses its share of traces.
 3. The CA key's storage (file, KMS or HSM) is not chosen yet; ADR 0008 defers it
-   to G04 and G05.
+   to G04 and G05. Until then `observex-node init` keeps it as a root-only file
+   on the first node (ADR 0010), which must be backed up and protected.
+6. NGINX comes from the distribution (ADR 0010). Its patch level is the
+   customer's responsibility, and on OpenSSL older than 3.5 the Front Door
+   cannot offer post-quantum key exchange.
 4. Browser monitoring data cannot be fully authenticated; it can be bounded and
    labelled only.
 5. A customer that points the AI at an external model sends telemetry outside
