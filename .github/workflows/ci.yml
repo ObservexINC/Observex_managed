@@ -24,6 +24,9 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
+      # The Front Door tests run NGINX for real; without it they skip.
+      - name: Install NGINX
+        run: sudo apt-get update -q && sudo apt-get install -y -q nginx-core
       - name: Format, vet, build, race tests, coverage
         run: make ci-local
       - name: Fuzz (time-boxed)
@@ -60,3 +63,27 @@ jobs:
         run: make licenses
       - name: Protobuf lint and format
         run: make proto-lint
+      - name: Shell scripts
+        run: |
+          sudo apt-get install -y -q shellcheck
+          make shell-check
+
+  node-install:
+    name: Node tarball install test (systemd)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          check-latest: true
+      - name: Install NGINX
+        run: sudo apt-get update -q && sudo apt-get install -y -q nginx-core
+      - name: Build the tarball and test it under a temporary root
+        run: make install-test VERSION=ci
+      # The runner is a fresh VM with systemd: install for real, kill NGINX,
+      # check the restart, uninstall.
+      - name: Live install test
+        run: sudo packaging/linux/test-install.sh live dist/observex-managed-node-ci-linux-amd64.tar.gz
