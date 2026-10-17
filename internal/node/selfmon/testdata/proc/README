@@ -1,0 +1,7 @@
+Recorded on Linux 6.18 (Ubuntu 24.04) on 15 Oct 2026 from a running NGINX
+master with two workers and a shell, then renumbered: process group 4100
+is NGINX (4100 master, 4101 and 4102 workers), 5200 is a process whose
+name contains spaces and parentheses, 6300 is unrelated, 7000 has an
+unreadable stat line. fd/ holds empty files standing for descriptors.
+CPU times (fields 14 and 15) and the workers' parent (field 4) were set by
+hand so the sums are known: group 4100 has 270 ticks, 5200 has 500.

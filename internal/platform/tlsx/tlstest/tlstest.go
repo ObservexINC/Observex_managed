@@ -1,5 +1,7 @@
 // Package tlstest creates throwaway certificate authorities and certificates
-// for tests. Keys live only in memory and are never written to disk.
+// for tests. Keys live in memory; they reach disk only when a test calls
+// WriteCA or WritePair, and then only inside that test's temporary
+// directory, for programs such as NGINX that read files.
 package tlstest
 
 import (
@@ -9,11 +11,46 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// WriteCA writes the CA certificate (not its key) as PEM into dir and
+// returns the file's path.
+func (ca *CA) WriteCA(t testing.TB, dir, name string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	writePEM(t, p, "CERTIFICATE", ca.Cert.Raw, 0o644)
+	return p
+}
+
+// WritePair writes a certificate and its private key as PEM into dir and
+// returns their paths. The key file is readable only by its owner.
+func WritePair(t testing.TB, dir, name string, cert tls.Certificate) (certPath, keyPath string) {
+	t.Helper()
+	certPath = filepath.Join(dir, name+".crt")
+	keyPath = filepath.Join(dir, name+".key")
+	writePEM(t, certPath, "CERTIFICATE", cert.Certificate[0], 0o644)
+	der, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
+	if err != nil {
+		t.Fatalf("tlstest: marshal key: %v", err)
+	}
+	writePEM(t, keyPath, "PRIVATE KEY", der, 0o600)
+	return certPath, keyPath
+}
+
+func writePEM(t testing.TB, path, kind string, der []byte, mode os.FileMode) {
+	t.Helper()
+	data := pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: der})
+	if err := os.WriteFile(path, data, mode); err != nil {
+		t.Fatalf("tlstest: write %s: %v", filepath.Base(path), err)
+	}
+}
 
 // CA is an in-memory certificate authority.
 type CA struct {
