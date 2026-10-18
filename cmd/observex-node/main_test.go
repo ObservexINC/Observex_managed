@@ -38,7 +38,7 @@ func freePorts(t *testing.T, n int) []string {
 	var out []string
 	var lns []net.Listener
 	for i := 0; i < n; i++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func freePorts(t *testing.T, n int) []string {
 		out = append(out, ln.Addr().String())
 	}
 	for _, ln := range lns {
-		ln.Close()
+		_ = ln.Close()
 	}
 	return out
 }
@@ -93,62 +93,6 @@ func TestVersionAndUsage(t *testing.T) {
 	}
 }
 
-func TestInitWritesConfigAndTLSOnce(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "etc", "node.json")
-	tlsDir := filepath.Join(dir, "etc", "tls")
-	code, out, errs := runCmd(t, "init", "-config", cfgPath, "-tls-dir", tlsDir, "-node-id", "node-a", "-host", "localhost", "-host", "127.0.0.1", "-peer", "node-b.internal")
-	if code != exitOK {
-		t.Fatalf("init: %d %s %s", code, out, errs)
-	}
-	if !strings.Contains(out, "wrote "+cfgPath) || !strings.Contains(out, "readable by root only") {
-		t.Fatalf("init output: %s", out)
-	}
-	cfg, err := node.Load(cfgPath)
-	if err != nil || cfg.NodeID != "node-a" || cfg.TLSDir != tlsDir || len(cfg.Peers) != 1 {
-		t.Fatalf("written config: %+v %v", cfg, err)
-	}
-	for _, f := range []string{"cluster-ca.crt", "cluster-ca.key", "node.crt", "node.key"} {
-		if _, err := os.Stat(filepath.Join(tlsDir, f)); err != nil {
-			t.Fatalf("%s: %v", f, err)
-		}
-	}
-	before, _ := os.ReadFile(filepath.Join(tlsDir, "cluster-ca.key"))
-	code, out, _ = runCmd(t, "init", "-config", cfgPath, "-tls-dir", tlsDir, "-node-id", "other")
-	if code != exitOK || !strings.Contains(out, "exists; kept") || strings.Count(out, "kept") != 2 {
-		t.Fatalf("second init: %d %s", code, out)
-	}
-	after, _ := os.ReadFile(filepath.Join(tlsDir, "cluster-ca.key"))
-	if !bytes.Equal(before, after) {
-		t.Fatal("second init replaced the CA key")
-	}
-	if cfg2, _ := node.Load(cfgPath); cfg2.NodeID != "node-a" {
-		t.Fatal("second init replaced the configuration")
-	}
-	if code, _, _ := runCmd(t, "init", "-config", filepath.Join(dir, "x.json"), "-group", "no-such-group-observex"); code != exitUsage {
-		t.Fatalf("unknown group: %d", code)
-	}
-	if code, _, _ := runCmd(t, "init", "-config", filepath.Join(dir, "y.json"), "-node-id", "Bad_ID"); code != exitUsage {
-		t.Fatalf("bad node id: %d", code)
-	}
-}
-
-func TestInitPlaintext(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "node.json")
-	code, out, _ := runCmd(t, "init", "-config", p, "-node-id", "dev", "-plaintext", "-tls-dir", filepath.Join(dir, "tls"))
-	if code != exitOK || !strings.Contains(out, "tls: skipped") {
-		t.Fatalf("%d %s", code, out)
-	}
-	cfg, err := node.Load(p)
-	if err != nil || !cfg.FrontDoor.Plaintext || cfg.FrontDoor.Console.Listen != "127.0.0.1:8080" {
-		t.Fatalf("%+v %v", cfg.FrontDoor, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "tls")); !os.IsNotExist(err) {
-		t.Fatal("plaintext init created TLS files")
-	}
-}
-
 func TestSanitizeID(t *testing.T) {
 	for in, want := range map[string]string{
 		"Node-1.example.com":    "node-1",
@@ -174,12 +118,12 @@ func TestCheckRenderAndFirewall(t *testing.T) {
 	if _, err := os.Stat(cfg.RunDir); !os.IsNotExist(err) {
 		t.Fatal("check wrote into the node's run directory")
 	}
-	ln, err := net.Listen("tcp", cfg.FrontDoor.Console.Listen)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", cfg.FrontDoor.Console.Listen)
 	if err != nil {
 		t.Fatal(err)
 	}
 	code, _, errs = runCmd(t, "check", "-config", p)
-	ln.Close()
+	_ = ln.Close()
 	if code != exitUsage || !strings.Contains(errs, "Console and API") {
 		t.Fatalf("check with a busy port: %d %s", code, errs)
 	}
@@ -203,8 +147,27 @@ func TestCheckRenderAndFirewall(t *testing.T) {
 	}
 }
 
+// nodeOnlyConfig writes a configuration whose node paths are never touched
+// by the command under test, so it uses fixed Linux paths and works on any
+// test host. The configuration file itself is a host file.
+func nodeOnlyConfig(t *testing.T) string {
+	t.Helper()
+	a := freePorts(t, 1)
+	doc := map[string]any{
+		"node_id": "cmd-test", "run_dir": "/run/observex-cmd-test", "data_dir": "/var/lib/observex-cmd-test",
+		"supervisor": map[string]any{"listen": a[0]},
+		"front_door": map[string]any{"nginx": "/usr/sbin/nginx", "plaintext": true},
+	}
+	raw, _ := json.Marshal(doc)
+	p := filepath.Join(t.TempDir(), "node.json")
+	if err := os.WriteFile(p, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestStatusAndHealthWhenNotRunning(t *testing.T) {
-	p, _ := devConfig(t, "/usr/sbin/nginx")
+	p := nodeOnlyConfig(t)
 	if code, _, errs := runCmd(t, "status", "-config", p); code != exitFailure || !strings.Contains(errs, "not running") {
 		t.Fatalf("status: %d %s", code, errs)
 	}

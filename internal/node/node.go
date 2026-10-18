@@ -6,7 +6,7 @@
 // ObserveX Server and the Embedded Gateway join it when they exist (G03 and
 // G04, integrated in G06); their loopback addresses are reserved here so
 // the Front Door's routes and the firewall report are already complete.
-// Until then the Front Door answers their routes with 502, and
+// Until then the Front Door answers their routes with 503, and
 // /node/health reports the node itself.
 //
 // Only the Front Door listens on a non-loopback address. Every other
@@ -51,6 +51,13 @@ const (
 
 // Config is the node configuration file (JSON). It holds no secrets: TLS
 // keys are referenced by path.
+//
+// Every path in it is a path on the Linux node: absolute and
+// slash-separated, built and checked with package path, never
+// path/filepath, so a configuration means the same thing on whatever
+// system parses or checks it. Only the code that touches the node's own
+// filesystem (running the node, observex-node init and check) treats them
+// as host paths, and that code runs on the node.
 type Config struct {
 	// NodeID names the node: lower-case letters, digits and '-'.
 	NodeID string `json:"node_id"`
@@ -129,11 +136,11 @@ func Parse(data []byte) (Config, error) {
 
 // Load reads and parses a node configuration file.
 func Load(p string) (Config, error) {
-	f, err := os.Open(p)
+	f, err := os.Open(p) // #nosec G304 -- the administrator names the configuration file
 	if err != nil {
 		return Config{}, fmt.Errorf("node configuration: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: a close error loses nothing
 	data, err := io.ReadAll(io.LimitReader(f, config.MaxSize+1))
 	if err != nil {
 		return Config{}, fmt.Errorf("node configuration: %w", err)
@@ -173,7 +180,7 @@ func (c *Config) applyDefaults() {
 		c.FrontDoor.StopTimeout = config.Duration(DefaultFrontDoorStop)
 	}
 	if !c.FrontDoor.Plaintext {
-		f := pki.Paths(c.TLSDir)
+		f := pki.NodePaths(c.TLSDir) // configuration paths are Linux paths
 		for _, l := range []*frontdoor.Listener{&c.FrontDoor.Console, &c.FrontDoor.Agents} {
 			def(&l.CertFile, f.NodeCert)
 			def(&l.KeyFile, f.NodeKey)

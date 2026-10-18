@@ -188,15 +188,16 @@ func TestFrontDoorCanServeTheCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	go func() {
 		c, err := ln.Accept()
 		if err == nil {
-			_ = c.(*tls.Conn).Handshake()
+			_ = c.(*tls.Conn).HandshakeContext(t.Context())
 			_ = c.Close()
 		}
 	}()
-	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS13})
+	d := &tls.Dialer{Config: &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS13}}
+	conn, err := d.DialContext(t.Context(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatalf("handshake against the generated certificate: %v", err)
 	}
@@ -219,5 +220,25 @@ func TestCheckPairIgnoresTheIssuer(t *testing.T) {
 	}
 	if _, err := CheckPair(a.NodeCert, a.NodeKey, now.Add(DefaultCertValidity+time.Hour)); err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("expired: %v", err)
+	}
+}
+
+// Configuration paths are Linux paths on every host; host paths follow the
+// host's separator.
+func TestNodePathsAreSlashSeparatedOnEveryHost(t *testing.T) {
+	f := NodePaths("/etc/observex/tls")
+	want := Files{
+		Dir:      "/etc/observex/tls",
+		CACert:   "/etc/observex/tls/cluster-ca.crt",
+		CAKey:    "/etc/observex/tls/cluster-ca.key",
+		NodeCert: "/etc/observex/tls/node.crt",
+		NodeKey:  "/etc/observex/tls/node.key",
+	}
+	if f != want {
+		t.Fatalf("NodePaths = %+v", f)
+	}
+	h := Paths(filepath.Join("a", "tls"))
+	if h.NodeKey != filepath.Join("a", "tls", NodeKeyName) {
+		t.Fatalf("Paths = %+v", h)
 	}
 }

@@ -157,7 +157,7 @@ func CheckPorts(ctx context.Context, c Config, opt firewall.Options) (firewall.R
 	}
 	var bad []string
 	for _, f := range r.Findings {
-		if f.Status == firewall.StatusInUse || f.Status == firewall.StatusNotLoopback {
+		if firewall.IsBindProblem(f.Status) {
 			bad = append(bad, f.Detail+" ("+f.Target+")")
 		}
 	}
@@ -248,7 +248,8 @@ func Run(ctx context.Context, c Config, opt Options) error {
 	if err != nil {
 		return err
 	}
-	ln, err := net.Listen("tcp", c.Supervisor.Listen)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", c.Supervisor.Listen)
 	if err != nil {
 		return fmt.Errorf("supervisor status address %s: %w", c.Supervisor.Listen, err)
 	}

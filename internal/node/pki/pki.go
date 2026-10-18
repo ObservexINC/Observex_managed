@@ -29,6 +29,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -73,7 +74,8 @@ type Files struct {
 	NodeKey  string `json:"node_key"`
 }
 
-// Paths returns the file paths inside dir.
+// Paths returns the file paths inside dir, a directory on the host that
+// runs this code. Init uses it to write the files.
 func Paths(dir string) Files {
 	return Files{
 		Dir:      dir,
@@ -81,6 +83,20 @@ func Paths(dir string) Files {
 		CAKey:    filepath.Join(dir, CAKeyName),
 		NodeCert: filepath.Join(dir, NodeCertName),
 		NodeKey:  filepath.Join(dir, NodeKeyName),
+	}
+}
+
+// NodePaths returns the file paths inside dir as they appear in a node
+// configuration. Managed nodes run on Linux, so configuration paths are
+// slash-separated whatever system reads or checks the configuration; host
+// paths from Paths would turn them into backslash paths on Windows.
+func NodePaths(dir string) Files {
+	return Files{
+		Dir:      dir,
+		CACert:   path.Join(dir, CACertName),
+		CAKey:    path.Join(dir, CAKeyName),
+		NodeCert: path.Join(dir, NodeCertName),
+		NodeKey:  path.Join(dir, NodeKeyName),
 	}
 }
 
@@ -285,7 +301,7 @@ func Init(dir string, opt Options) (Files, error) {
 // writeNew creates a file that must not exist yet, with an exact mode
 // (independent of the umask).
 func writeNew(path string, data []byte, mode os.FileMode) error {
-	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode) // #nosec G304 -- a fixed name inside the TLS directory the administrator chose
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return ErrExists
@@ -343,7 +359,7 @@ func Check(certFile, keyFile, caFile string, now time.Time) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	caPEM, err := os.ReadFile(caFile)
+	caPEM, err := os.ReadFile(caFile) // #nosec G304 -- the configured CA certificate
 	if err != nil {
 		return s, fmt.Errorf("pki: read CA certificate: %w", err)
 	}

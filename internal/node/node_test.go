@@ -166,11 +166,11 @@ func TestSpecs(t *testing.T) {
 }
 
 func TestCheckPortsNamesTheConflict(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	busy := ln.Addr().String()
 	free := freeAddrs(t, 3)
 	doc := `{"node_id":"n","front_door":{"plaintext":true,"console":{"listen":"` + free[0] + `"},"agents":{"listen":"` + free[1] + `"},"probe_listen":"` + free[2] + `"},"supervisor":{"listen":"` + busy + `"}}`
@@ -182,7 +182,7 @@ func TestCheckPortsNamesTheConflict(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Node Supervisor status and metrics") || !strings.Contains(err.Error(), busy) {
 		t.Fatalf("want the supervisor port named as in use, got %v", err)
 	}
-	ln.Close()
+	_ = ln.Close()
 	if _, err := CheckPorts(context.Background(), c, firewall.Options{}); err != nil {
 		t.Fatalf("free ports: %v", err)
 	}
@@ -195,7 +195,7 @@ func freeAddrs(t *testing.T, n int) []string {
 	var out []string
 	var lns []net.Listener
 	for i := 0; i < n; i++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}

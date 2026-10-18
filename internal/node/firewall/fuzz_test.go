@@ -50,8 +50,7 @@ func FuzzCheck(f *testing.F) {
 		}
 		problems := 0
 		for _, f := range r.Findings {
-			switch f.Status {
-			case StatusInUse, StatusNotLoopback, StatusBlocked, StatusTimeout:
+			if IsProblem(f.Status) {
 				problems++
 			}
 		}

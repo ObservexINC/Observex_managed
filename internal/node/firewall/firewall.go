@@ -108,8 +108,32 @@ const (
 	StatusReachable   = "reachable"    // a peer answered
 	StatusRefused     = "refused"      // the peer is up, nothing listens on that port
 	StatusTimeout     = "timeout"      // no answer: a firewall or the network drops it
+	StatusUnreachable = "unreachable"  // no route, or the name does not resolve
+	StatusPermission  = "permission_denied"
+	StatusNoAddress   = "no_such_address"
+	StatusBindError   = "bind_error"
 	StatusInfo        = "info"
 )
+
+// IsProblem reports whether a status stops the node or a cluster link.
+func IsProblem(status string) bool {
+	switch status {
+	case StatusInUse, StatusNotLoopback, StatusBlocked, StatusTimeout, StatusUnreachable,
+		StatusPermission, StatusNoAddress, StatusBindError:
+		return true
+	}
+	return false
+}
+
+// IsBindProblem reports whether a status means this node cannot bind one of
+// its own addresses.
+func IsBindProblem(status string) bool {
+	switch status {
+	case StatusInUse, StatusNotLoopback, StatusPermission, StatusNoAddress, StatusBindError:
+		return true
+	}
+	return false
+}
 
 // Finding is one result.
 type Finding struct {
@@ -170,7 +194,7 @@ func ExecRunner(ctx context.Context, argv []string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, path, argv[1:]...)
+	cmd := exec.CommandContext(ctx, path, argv[1:]...) // #nosec G204 -- argv passed allowed(): a fixed list of read-only firewall commands
 	cmd.Env = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -207,10 +231,15 @@ func Check(ctx context.Context, plan Plan, opt Options) (Report, error) {
 		return opt.Run(ctx, argv)
 	}
 	if opt.Listen == nil {
-		opt.Listen = func(a string) (net.Listener, error) { return net.Listen("tcp", a) }
+		opt.Listen = func(a string) (net.Listener, error) {
+			var lc net.ListenConfig
+			return lc.Listen(ctx, "tcp", a)
+		}
 	}
 	if opt.DialTimeout <= 0 {
-		opt.DialTimeout = 2 * time.Second
+		// Long enough for Windows, which retries a refused connection for
+		// about two seconds before reporting it.
+		opt.DialTimeout = 5 * time.Second
 	}
 	if opt.Dial == nil {
 		d := &net.Dialer{Timeout: opt.DialTimeout}
@@ -247,7 +276,8 @@ func Check(ctx context.Context, plan Plan, opt Options) (Report, error) {
 		case opt.NodeRunning:
 			r.add(Finding{Check: "bind", Port: p.Port, Target: p.Bind, Status: StatusInfo, Detail: p.Purpose + ": in use, expected while the node runs"})
 		default:
-			r.add(Finding{Check: "bind", Port: p.Port, Target: p.Bind, Status: StatusInUse, Detail: p.Purpose + ": " + bindError(err)})
+			status, detail := bindStatus(err)
+			r.add(Finding{Check: "bind", Port: p.Port, Target: p.Bind, Status: status, Detail: p.Purpose + ": " + detail})
 		}
 	}
 
@@ -268,14 +298,12 @@ func Check(ctx context.Context, plan Plan, opt Options) (Report, error) {
 				conn, err := opt.Dial(dctx, target)
 				cancel()
 				f := Finding{Check: "peer", Port: p.Port, Target: target}
-				switch {
-				case err == nil:
+				if err == nil {
 					_ = conn.Close()
 					f.Status, f.Detail = StatusReachable, p.Purpose+": answered"
-				case isRefused(err):
-					f.Status, f.Detail = StatusRefused, p.Purpose+": the host answered but nothing listens yet"
-				default:
-					f.Status, f.Detail = StatusTimeout, p.Purpose+": no answer; a firewall or the network may drop it"
+				} else {
+					status, detail := dialStatus(err)
+					f.Status, f.Detail = status, p.Purpose+": "+detail
 				}
 				r.add(f)
 			}
@@ -285,8 +313,7 @@ func Check(ctx context.Context, plan Plan, opt Options) (Report, error) {
 }
 
 func (r *Report) add(f Finding) {
-	switch f.Status {
-	case StatusInUse, StatusNotLoopback, StatusBlocked, StatusTimeout:
+	if IsProblem(f.Status) {
 		r.Problems++
 	}
 	r.Findings = append(r.Findings, f)
@@ -446,23 +473,6 @@ func isLoopback(a string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func isRefused(err error) bool {
-	return strings.Contains(err.Error(), "connection refused")
-}
-
-func bindError(err error) string {
-	s := err.Error()
-	switch {
-	case strings.Contains(s, "address already in use"):
-		return "already in use by another process"
-	case strings.Contains(s, "permission denied"):
-		return "permission denied (ports below 1024 need CAP_NET_BIND_SERVICE)"
-	case strings.Contains(s, "cannot assign requested address"):
-		return "this host has no such address"
-	}
-	return "cannot bind: " + s
-}
-
 // Text renders the report for a terminal.
 func (r Report) Text() string {
 	var b strings.Builder
@@ -481,7 +491,7 @@ func (r Report) Text() string {
 		if target == "" && f.Port != 0 {
 			target = strconv.Itoa(f.Port)
 		}
-		fmt.Fprintf(&b, "  %-12s %-9s %-22s %s\n", f.Status, f.Check, target, f.Detail)
+		fmt.Fprintf(&b, "  %-17s %-9s %-22s %s\n", f.Status, f.Check, target, f.Detail)
 	}
 	if len(r.Suggested) > 0 {
 		b.WriteString("\nSuggested commands (review before running; nothing was run)\n")

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -210,12 +212,12 @@ func TestNftablesAndIptablesAreLeftForReview(t *testing.T) {
 }
 
 func TestBindChecks(t *testing.T) {
-	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	busy, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer busy.Close()
-	free, err := net.Listen("tcp", "127.0.0.1:0")
+	defer func() { _ = busy.Close() }()
+	free, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,14 +243,69 @@ func TestBindChecks(t *testing.T) {
 	if hasFinding(r, "bind", StatusInUse, "") || !hasFinding(r, "bind", StatusInfo, "expected while the node runs") {
 		t.Fatalf("NodeRunning: %+v", r.Findings)
 	}
-	for _, msg := range []struct{ err, want string }{
-		{"listen tcp :80: bind: permission denied", "CAP_NET_BIND_SERVICE"},
-		{"bind: cannot assign requested address", "no such address"},
-		{"something else", "cannot bind: something else"},
-	} {
-		if got := bindError(errors.New(msg.err)); !strings.Contains(got, msg.want) {
-			t.Fatalf("bindError(%q) = %q", msg.err, got)
+}
+
+// errnoOf returns this platform's error number for a kind.
+func errnoOf(t *testing.T, k netErrKind) syscall.Errno {
+	t.Helper()
+	for e, kk := range errnoKinds {
+		if kk == k {
+			return e
 		}
+	}
+	t.Fatalf("no error number for kind %d on this platform", k)
+	return 0
+}
+
+func opErr(op string, e error) error {
+	return &net.OpError{Op: op, Net: "tcp", Err: os.NewSyscallError(op, e)}
+}
+
+func TestBindStatusUsesErrorNumbers(t *testing.T) {
+	cases := []struct {
+		err        error
+		status     string
+		wantDetail string
+	}{
+		{opErr("bind", errnoOf(t, kindInUse)), StatusInUse, "already in use"},
+		{opErr("bind", errnoOf(t, kindPermission)), StatusPermission, "CAP_NET_BIND_SERVICE"},
+		{opErr("bind", errnoOf(t, kindNoAddress)), StatusNoAddress, "no such address"},
+		// English text alone decides nothing.
+		{errors.New("bind: address already in use"), StatusBindError, "cannot bind: bind: address already in use"},
+		{errors.New("something else"), StatusBindError, "cannot bind: something else"},
+	}
+	for _, c := range cases {
+		status, detail := bindStatus(c.err)
+		if status != c.status || !strings.Contains(detail, c.wantDetail) {
+			t.Errorf("bindStatus(%v) = %s, %q; want %s, %q", c.err, status, detail, c.status, c.wantDetail)
+		}
+		if !IsProblem(status) || !IsBindProblem(status) {
+			t.Errorf("%s is not counted as a bind problem", status)
+		}
+	}
+}
+
+func TestDialStatusUsesErrorTypes(t *testing.T) {
+	cases := []struct {
+		err    error
+		status string
+	}{
+		{opErr("connect", errnoOf(t, kindRefused)), StatusRefused},
+		{opErr("connect", errnoOf(t, kindTimeout)), StatusTimeout},
+		{&net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}, StatusTimeout},
+		{context.DeadlineExceeded, StatusTimeout},
+		{opErr("connect", errnoOf(t, kindUnreachable)), StatusUnreachable},
+		{&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "node-9.invalid", IsNotFound: true}}, StatusUnreachable},
+		// A refused-looking message that is not a refusal is not reported as one.
+		{errors.New("dial tcp: connect: connection refused"), StatusUnreachable},
+	}
+	for _, c := range cases {
+		if status, _ := dialStatus(c.err); status != c.status {
+			t.Errorf("dialStatus(%v) = %s, want %s", c.err, status, c.status)
+		}
+	}
+	if IsProblem(StatusRefused) {
+		t.Error("a refused connection means the peer is up; it is not a firewall problem")
 	}
 }
 
@@ -272,8 +329,9 @@ func TestPeerChecks(t *testing.T) {
 		want string
 	}{
 		{nil, StatusReachable},
-		{errors.New("dial tcp 10.0.0.2:8444: connect: connection refused"), StatusRefused},
-		{errors.New("dial tcp 10.0.0.2:8444: i/o timeout"), StatusTimeout},
+		{opErr("connect", errnoOf(t, kindRefused)), StatusRefused},
+		{&net.OpError{Op: "dial", Net: "tcp", Err: os.ErrDeadlineExceeded}, StatusTimeout},
+		{opErr("connect", errnoOf(t, kindUnreachable)), StatusUnreachable},
 	}
 	for _, tc := range cases {
 		r, _ := Check(context.Background(), plan, Options{Run: (&fakeHost{}).run, Listen: freeListen, Dial: dialAll(tc.err)})
@@ -281,12 +339,14 @@ func TestPeerChecks(t *testing.T) {
 			t.Fatalf("dial error %v: findings %+v", tc.err, r.Findings)
 		}
 	}
-	// A real refused connection on loopback.
-	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	// A real refused connection on loopback, with the default timeout:
+	// Windows retries a refused connection for about two seconds before
+	// reporting it, so a shorter timeout would misreport it as a timeout.
+	ln, _ := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	_, port, _ := net.SplitHostPort(ln.Addr().String())
 	_ = ln.Close()
 	p := mustPort(t, "0.0.0.0:"+port, "Server cluster RPC", Cluster)
-	r, _ := Check(context.Background(), Plan{Ports: []Port{p}, Peers: []string{"127.0.0.1"}}, Options{Run: (&fakeHost{}).run, Listen: freeListen, DialTimeout: time.Second})
+	r, _ := Check(context.Background(), Plan{Ports: []Port{p}, Peers: []string{"127.0.0.1"}}, Options{Run: (&fakeHost{}).run, Listen: freeListen})
 	if !hasFinding(r, "peer", StatusRefused, "") {
 		t.Fatalf("findings = %+v", r.Findings)
 	}
