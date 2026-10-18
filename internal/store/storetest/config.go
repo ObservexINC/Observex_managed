@@ -77,6 +77,40 @@ func ConfigStore(t *testing.T, open func(t *testing.T) store.ConfigStore) {
 		wantErr(t, "delete missing", c.Delete(ctx(t), "rules/r1", store.AnyRevision), store.ErrNotFound)
 	})
 
+	t.Run("delete validates arguments before the key's state", func(t *testing.T) {
+		c := open(t)
+		r, err := c.Put(ctx(t), "present", []byte("x"), store.MustNotExist)
+		noErr(t, "put", err)
+		for _, key := range []string{"present", "absent"} {
+			for _, bad := range []store.Revision{store.MustNotExist, store.Revision(-2), store.Revision(-100)} {
+				wantErr(t, fmt.Sprintf("delete %s with revision %d", key, bad), c.Delete(ctx(t), key, bad), store.ErrInvalid)
+			}
+		}
+		wantErr(t, "delete empty key", c.Delete(ctx(t), "", store.AnyRevision), store.ErrInvalid)
+		wantErr(t, "delete absent with any revision", c.Delete(ctx(t), "absent", store.AnyRevision), store.ErrNotFound)
+		wantErr(t, "delete absent with a positive revision", c.Delete(ctx(t), "absent", r), store.ErrNotFound)
+		// Rejected calls changed nothing and did not advance the revision.
+		kv, err := c.Get(ctx(t), "present")
+		noErr(t, "get", err)
+		if kv.Revision != r {
+			t.Fatalf("revision moved from %d to %d after rejected deletes", r, kv.Revision)
+		}
+		next, err := c.Put(ctx(t), "other", []byte("y"), store.MustNotExist)
+		noErr(t, "put other", err)
+		if next != r+1 {
+			t.Fatalf("next revision %d, want %d: a rejected call advanced the counter", next, r+1)
+		}
+		noErr(t, "delete with any revision", c.Delete(ctx(t), "present", store.AnyRevision))
+	})
+
+	t.Run("closed store wins over invalid arguments", func(t *testing.T) {
+		c := open(t)
+		noErr(t, "close", c.Close())
+		wantErr(t, "delete after close", c.Delete(ctx(t), "absent", store.MustNotExist), store.ErrClosed)
+		_, err := c.Put(ctx(t), "", nil, store.Revision(-7))
+		wantErr(t, "put after close", err, store.ErrClosed)
+	})
+
 	t.Run("list by prefix, sorted", func(t *testing.T) {
 		c := open(t)
 		for _, k := range []string{"nodes/3", "nodes/1", "nodes/2", "nodesX", "users/a"} {

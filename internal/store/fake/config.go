@@ -91,12 +91,19 @@ func (c *ConfigStore) Delete(ctx context.Context, key string, expected store.Rev
 	if err := c.check(ctx); err != nil {
 		return err
 	}
+	// Arguments first, so the answer does not depend on whether the key
+	// exists.
+	switch {
+	case key == "":
+		return store.Invalid("config key is empty")
+	case expected == store.MustNotExist:
+		return store.Invalid("delete cannot use MustNotExist")
+	case expected < store.AnyRevision:
+		return store.Invalid("expected revision %d is not valid", expected)
+	}
 	cur, exists := c.entries[key]
 	if !exists {
 		return store.ErrNotFound
-	}
-	if expected == store.MustNotExist {
-		return store.Invalid("delete cannot use MustNotExist")
 	}
 	if err := checkExpected(cur, exists, expected); err != nil {
 		return err

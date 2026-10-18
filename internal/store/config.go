@@ -26,8 +26,15 @@ type KV struct {
 //   - Put with MustNotExist fails with ErrConflict if the key exists; with a
 //     positive revision it succeeds only if the key's current revision matches;
 //     with AnyRevision it always writes. It returns the new revision.
-//   - Delete takes a positive revision or AnyRevision; MustNotExist is
-//     ErrInvalid, and deleting a missing key is ErrNotFound.
+//   - Delete takes a positive revision or AnyRevision. MustNotExist and
+//     revisions below AnyRevision are ErrInvalid, whether or not the key
+//     exists; deleting a missing key with a valid revision is ErrNotFound; a
+//     positive revision that does not match is ErrConflict.
+//   - An empty key is ErrInvalid for Put and Delete.
+//   - Errors are checked in this order: a closed store (ErrClosed) or an
+//     ended context, then invalid arguments (ErrInvalid), then the key's
+//     state (ErrNotFound, ErrConflict). A rejected call changes nothing and
+//     does not advance the revision.
 //   - List returns entries whose key starts with prefix, sorted by key.
 //   - Values are copied in and out; callers cannot change stored bytes.
 type ConfigStore interface {
