@@ -20,7 +20,10 @@ set -eu
 
 MODE=${1:-}
 TARBALL=${2:-}
-[ -n "$MODE" ] && [ -n "$TARBALL" ] || { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+if [ -z "$MODE" ] || [ -z "$TARBALL" ]; then
+	sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+	exit 2
+fi
 [ -f "$TARBALL" ] || { echo "no such tarball: $TARBALL" >&2; exit 2; }
 
 N=0
@@ -32,7 +35,11 @@ check() { # check "description" command...
 	shift
 	if "$@" >/dev/null 2>&1; then ok "$d"; else notok "$d"; fi
 }
+# The predicates below run through check ("$@"), which ShellCheck cannot
+# follow; SC2317 (unreachable command) is disabled for them alone.
+# shellcheck disable=SC2317
 mode_is() { [ "$(stat -c '%a' "$1")" = "$2" ]; }
+# shellcheck disable=SC2317
 owner_is() { [ "$(stat -c '%U:%G' "$1")" = "$2" ]; }
 finish() {
 	echo "1..$N"
@@ -122,6 +129,10 @@ if [ "$SYSTEMD" -eq 1 ]; then
 	fi
 	check "service is enabled" systemctl is-enabled --quiet observex-node.service
 	check "service is active" systemctl is-active --quiet observex-node.service
+	# ExecStartPre ran "observex-node check" as observex with only
+	# CAP_NET_BIND_SERVICE, and it could check port 443.
+	check "pre-start check passed in the service's context, ports included" sh -c \
+		"journalctl -u observex-node.service --no-pager -o cat | grep -qx 'ports: free'"
 else
 	if "$PKG/install.sh" --no-systemd --node-id live-test --host localhost --host 127.0.0.1 >"$WORK/install.log" 2>&1; then
 		ok "install.sh installs (no systemd on this machine)"
@@ -129,11 +140,24 @@ else
 		notok "install.sh installs (no systemd on this machine)"
 		sed 's/^/# /' "$WORK/install.log"
 	fi
-	# What the unit's RuntimeDirectory= and User= would do.
+	# What the unit's RuntimeDirectory=, User=, ExecStartPre= and the
+	# capability settings would do.
 	install -d -m 0750 -o observex -g observex /run/observex
-	setpriv --reuid observex --regid observex --init-groups \
-		--inh-caps +net_bind_service --ambient-caps +net_bind_service \
-		env OBSERVEX_NODE_CONFIG=/etc/observex/node.json "$NODE" run >"$WORK/node.log" 2>&1 &
+	# as_service replaces the shell it runs in with the command, so call it
+	# in a subshell or as a background job; the job's PID is then the node.
+	as_service() {
+		exec setpriv --reuid observex --regid observex --init-groups \
+			--inh-caps +net_bind_service --ambient-caps +net_bind_service \
+			--bounding-set -all,+net_bind_service --no-new-privs \
+			env OBSERVEX_NODE_CONFIG=/etc/observex/node.json "$@"
+	}
+	if (as_service "$NODE" check) >"$WORK/check.log" 2>&1 && grep -qx 'ports: free' "$WORK/check.log"; then
+		ok "pre-start check passed in the service's context, ports included"
+	else
+		notok "pre-start check passed in the service's context, ports included"
+		sed 's/^/# /' "$WORK/check.log"
+	fi
+	as_service "$NODE" run >"$WORK/node.log" 2>&1 &
 	NODE_PID=$!
 fi
 
@@ -148,10 +172,34 @@ check "CA key is root:root 0600" sh -c "[ \"\$(stat -c '%U:%G %a' /etc/observex/
 check "/var/lib/observex is observex:observex" owner_is /var/lib/observex observex:observex
 check "health through the Front Door over TLS 1.3 (port 443)" sh -c \
 	"curl -sf --tlsv1.3 --cacert /etc/observex/tls/cluster-ca.crt https://localhost/node/health | grep -q '\"ready\"'"
-check "Front Door does not expose /metrics" sh -c \
-	"[ \$(curl -s -o /dev/null -w '%{http_code}' --cacert /etc/observex/tls/cluster-ca.crt https://localhost/metrics) != 200 ]"
-check "Agents listener (9443) refuses a request without a client certificate" sh -c \
-	"code=\$(curl -s -o /dev/null -w '%{http_code}' --cacert /etc/observex/tls/cluster-ca.crt -X POST https://localhost:9443/v1/metrics); [ \"\$code\" = 403 ] || [ \"\$code\" = 496 ]"
+# answers URL BODYFILE: the HTTP status of a request that reached the Front
+# Door over TLS; it fails (and prints nothing) when the transport failed, so
+# an unreachable node never passes for a protected one. It and the two
+# predicates after it run through check (SC2317 disabled, as above).
+# shellcheck disable=SC2317
+answers() {
+	url=$1
+	body=$2
+	shift 2
+	curl -s -o "$body" -w '%{http_code}' --cacert /etc/observex/tls/cluster-ca.crt "$@" "$url"
+}
+# shellcheck disable=SC2317
+metrics_not_exposed() {
+	# The node's metrics are served on loopback only. Through a healthy
+	# Front Door, /metrics goes to the ObserveX Server's route, which
+	# answers 503 until the Server exists (G03); it must never carry the
+	# node's own metrics.
+	curl -sf --cacert /etc/observex/tls/cluster-ca.crt https://localhost/node/health | grep -q '"ready"' || return 1
+	code=$(answers https://localhost/metrics "$WORK/metrics.body") || return 1
+	[ "$code" = 503 ] && grep -q '"service unavailable"' "$WORK/metrics.body" && ! grep -q observex_node_ "$WORK/metrics.body"
+}
+# shellcheck disable=SC2317
+agents_need_certificate() {
+	code=$(answers https://localhost:9443/v1/metrics "$WORK/agents.body" -X POST) || return 1
+	[ "$code" = 403 ] && grep -q '"client certificate required"' "$WORK/agents.body"
+}
+check "Front Door is up and does not expose the node's /metrics (503 from the Server route)" metrics_not_exposed
+check "Agents listener (9443) answers 403 to a request without a client certificate" agents_need_certificate
 check "self-monitoring on loopback reports the node ready" sh -c "curl -sf http://127.0.0.1:8180/metrics | grep -qx 'observex_node_ready 1'"
 
 STATUS=$("$NODE" status 2>/dev/null || true)
@@ -171,6 +219,12 @@ if [ -n "$PID" ]; then
 	check "the restarted NGINX is a new process" test -n "$NEWPID" -a "$NEWPID" != "$PID"
 	check "health through the Front Door after the restart" sh -c \
 		"curl -sf --cacert /etc/observex/tls/cluster-ca.crt https://localhost/node/health | grep -q '\"ready\"'"
+else
+	# The restart checks still count, so a node that never started cannot
+	# pass with fewer checks.
+	notok "killed NGINX (SIGKILL) is restarted (no NGINX to kill)"
+	notok "the restarted NGINX is a new process (no NGINX to kill)"
+	notok "health through the Front Door after the restart (no NGINX to kill)"
 fi
 
 if [ "$SYSTEMD" -eq 1 ]; then

@@ -9,6 +9,11 @@ Type=simple
 User=observex
 Group=observex
 Environment=OBSERVEX_NODE_CONFIG=/etc/observex/node.json
+# Every start first checks the configuration, the TLS files, NGINX and the
+# ports, as the service user with the service's capabilities and sandbox,
+# so the check sees exactly what the node will see (it can bind 443 only
+# because of AmbientCapabilities below). A failed check fails the start.
+ExecStartPre=/opt/observex/bin/observex-node check
 ExecStart=/opt/observex/bin/observex-node run
 # systemd restarts the Node Supervisor if it dies; the supervisor restarts
 # the components.

@@ -26,7 +26,7 @@
 set -eu
 
 PROG=install.sh
-HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ROOT=""
 NODE_ID=""
 INIT_ARGS=""
@@ -153,9 +153,18 @@ if [ "$SYSTEMD" -eq 1 ]; then
 fi
 
 if [ "$START" -eq 1 ]; then
-	runuser -u "$SERVICE_USER" -- env OBSERVEX_NODE_CONFIG="$ETC_DIR/node.json" "$BIN_DIR/observex-node" check \
-		|| die "the pre-start check failed; fix the problem above, then: systemctl start observex-node"
-	systemctl restart observex-node.service
+	# The unit runs "observex-node check" before every start (ExecStartPre),
+	# as the service user with the service's capabilities and sandbox. A
+	# check run here as a plain user could not bind port 443 although the
+	# service can, so the installer does not run its own.
+	since=$(date +%s)
+	if ! systemctl restart observex-node.service; then
+		systemctl stop observex-node.service 2>/dev/null || true
+		journalctl --sync 2>/dev/null || true
+		echo "$PROG: the node did not start; the service reported:" >&2
+		journalctl -u observex-node.service --since "@$since" --no-pager -o cat 2>/dev/null | tail -n 30 | sed 's/^/    /' >&2 || true
+		die "fix the problem above, then: systemctl start observex-node (the service is enabled but stopped)"
+	fi
 	i=0
 	while [ $i -lt 60 ]; do
 		if OBSERVEX_NODE_CONFIG="$ETC_DIR/node.json" "$BIN_DIR/observex-node" health >/dev/null 2>&1; then
@@ -169,5 +178,10 @@ if [ "$START" -eq 1 ]; then
 fi
 
 say "firewall report (read-only; nothing was changed):"
-OBSERVEX_NODE_CONFIG="$ETC_DIR/node.json" "$BIN_DIR/observex-node" firewall -skip-peers $([ "$START" -eq 1 ] && echo -running) || true
+if [ "$START" -eq 1 ]; then
+	set -- -running
+else
+	set --
+fi
+OBSERVEX_NODE_CONFIG="$ETC_DIR/node.json" "$BIN_DIR/observex-node" firewall -skip-peers "$@" || true
 say "done"

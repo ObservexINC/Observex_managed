@@ -18,7 +18,7 @@ from a tarball on a clean VM."
 - At G01 the only component is the Front Door (NGINX). The Server and the
   Embedded Gateway join in G03 and G04 and are integrated in G06. Their
   loopback addresses are reserved now, so the Front Door's routes are fixed
-  from the start and answer 502 until then.
+  from the start and answer 503 (service unavailable) until then.
 - Each component runs in its own process group; when a component dies, the
   supervisor kills what it left behind (NGINX workers holding the listening
   sockets) before restarting it. On Linux a component dies with the
@@ -62,6 +62,12 @@ IP addresses only; a peer given by host name becomes a comment.
 - `install.sh` never changes the firewall, never installs packages and never
   overwrites an existing configuration or key. It keeps the previous binary
   for rollback.
+- Every start of the service runs `observex-node check` first
+  (`ExecStartPre`), as `observex` with the service's capability and sandbox,
+  so the check sees what the node will see: it can test port 443 only
+  because the service holds `CAP_NET_BIND_SERVICE`. A failed check fails
+  the start; the installer then prints the check's message, stops the
+  service and exits non-zero.
 
 ### First-install TLS (interim)
 

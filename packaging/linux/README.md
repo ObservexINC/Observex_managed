@@ -4,7 +4,7 @@ This tarball installs one node of an ObserveX Managed cluster on Linux.
 At this stage (goal G01) a node runs the Node Supervisor, the NGINX Front
 Door and self-monitoring. The ObserveX Server, the Embedded Gateway and the
 stores join the node in later goals; until then the Front Door answers their
-routes with HTTP 502.
+routes with HTTP 503 (service unavailable).
 
 ## Requirements
 
@@ -41,6 +41,15 @@ The installer:
    only if they do not exist;
 4. installs and starts `observex-node.service`, waits until the node is
    ready, and prints the firewall report.
+
+Every start of the service first runs `observex-node check` as the user
+`observex`, with the service's capability and sandbox: it checks the
+configuration, the TLS files, NGINX and that ports 443 and 9443 are free.
+If the check fails, the service does not start; the installer prints the
+reason, leaves the service enabled but stopped, and exits with an error.
+Fix the problem, then run `systemctl start observex-node`. After a reboot or
+a crash, systemd runs the same check before every restart; its messages are
+in `journalctl -u observex-node`.
 
 ## Check the node
 
