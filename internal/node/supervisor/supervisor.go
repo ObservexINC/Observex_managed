@@ -277,7 +277,7 @@ func validName(n string) bool {
 		return false
 	}
 	for _, r := range n {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 			return false
 		}
 	}
@@ -463,7 +463,10 @@ func (s *Supervisor) start(c *component) (<-chan struct{}, error) {
 	if s.stopping {
 		return nil, errStopping
 	}
-	cmd := exec.Command(c.spec.Path, c.spec.Args...)
+	// Specs come from the node's own validated configuration. No context:
+	// the supervisor ends a component with its own stop sequence (signal,
+	// grace period, then kill of the process group), not on cancellation.
+	cmd := exec.Command(c.spec.Path, c.spec.Args...) //nolint:noctx,gosec // G204 and no context: see above
 	cmd.Env = c.spec.Env
 	cmd.Dir = c.spec.Dir
 	w := s.out.prefixed(c.spec.Name)
@@ -486,6 +489,10 @@ func (s *Supervisor) start(c *component) (<-chan struct{}, error) {
 	s.logger.Info("component started", "child", c.spec.Name, "pid", cmd.Process.Pid)
 	go func() {
 		err := cmd.Wait()
+		// Wait has drained the output pipes: end this process's stream, so
+		// its last partial line is written and its key state cannot carry
+		// over to the next process.
+		w.close()
 		// ErrWaitDelay means the process exited but something it started
 		// still held its output. The exit status is what counts.
 		leftovers := errors.Is(err, exec.ErrWaitDelay)
@@ -732,7 +739,7 @@ func exitText(err error) string {
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		return ee.ProcessState.String()
+		return ee.String()
 	}
 	return "wait error"
 }

@@ -45,7 +45,9 @@ func onTerm(mode string) {
 // and shares this process's output and process group.
 func spawnChild(addr string) int {
 	onTerm("serve")
-	child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", "serve", addr)
+	// Like an NGINX worker, the child lives until its process group is
+	// killed; no context applies.
+	child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", "serve", addr) //nolint:noctx // see above
 	child.Stdout, child.Stderr = os.Stdout, os.Stderr
 	if err := child.Start(); err != nil {
 		return 4

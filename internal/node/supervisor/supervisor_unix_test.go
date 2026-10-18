@@ -131,7 +131,7 @@ func TestComponentsDieWithTheSupervisor(t *testing.T) {
 		t.Skip("Pdeathsig exists only on Linux")
 	}
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
-	sup := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", "supervise", freeAddr(t), pidFile)
+	sup := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperProcess$", "--", "supervise", freeAddr(t), pidFile)
 	if err := sup.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -174,4 +174,17 @@ func alive(pid int) bool {
 	s := string(b)
 	i := strings.LastIndexByte(s, ')')
 	return i < 0 || i+2 >= len(s) || s[i+2] != 'Z'
+}
+
+// children returns the children of every record with this message, in order.
+func (r *recorder) children(msg string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, e := range r.entries {
+		if e.msg == msg {
+			out = append(out, e.child)
+		}
+	}
+	return out
 }

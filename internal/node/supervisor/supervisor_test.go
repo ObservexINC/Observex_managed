@@ -34,7 +34,7 @@ func helperArgs() (mode, addr, extra string, ok bool) {
 	return "", "", "", false
 }
 
-func TestHelperProcess(t *testing.T) {
+func TestHelperProcess(_ *testing.T) {
 	mode, addr, extra, ok := helperArgs()
 	if !ok {
 		return // a normal test run, not a helper
@@ -45,11 +45,11 @@ func TestHelperProcess(t *testing.T) {
 // freeAddr returns a loopback address that was free a moment ago.
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().String()
 }
 
@@ -129,19 +129,6 @@ func (r *recorder) Handle(_ context.Context, rec slog.Record) error {
 	r.entries = append(r.entries, e)
 	r.mu.Unlock()
 	return nil
-}
-
-// children returns the children of every record with this message, in order.
-func (r *recorder) children(msg string) []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	var out []string
-	for _, e := range r.entries {
-		if e.msg == msg {
-			out = append(out, e.child)
-		}
-	}
-	return out
 }
 
 // index returns the position of the first record with msg and child, or -1.
@@ -453,6 +440,21 @@ func TestOutputIsPrefixedPerLineAndRedacted(t *testing.T) {
 	}
 }
 
+func TestKeyStateEndsWithTheProcess(t *testing.T) {
+	sp := helperSpec(t, "keyprinter", "print-key")
+	sp.Ready = nil
+	r := start(t, []Spec{sp}, fast)
+	r.waitFor("a restart", func(Status) bool { return strings.Count(r.out.String(), "[keyprinter] before key\n") >= 2 })
+	r.stopClean()
+	out := r.out.String()
+	if strings.Contains(out, bodyMarker) {
+		t.Fatalf("key material reached the output:\n%s", out)
+	}
+	if !strings.Contains(out, "[keyprinter] [REDACTED]\n") {
+		t.Fatalf("BEGIN line not shown redacted:\n%s", out)
+	}
+}
+
 func TestDefaultEnvironmentHidesTheSupervisorsSecrets(t *testing.T) {
 	t.Setenv("OBSERVEX_TEST_DB_PASSWORD", "not-for-children")
 	sp := helperSpec(t, "env", "print-env")
@@ -474,7 +476,7 @@ func TestStatusHandler(t *testing.T) {
 	h := r.sup.Handler("node-1")
 	get := func(method, path string) (int, string) {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), method, path, nil))
 		return rec.Code, rec.Body.String()
 	}
 	r.waitFor("ready", func(s Status) bool { return s.Ready })
@@ -510,7 +512,7 @@ func TestStatusHandler(t *testing.T) {
 }
 
 func TestReadyChecks(t *testing.T) {
-	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	ok := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer ok.Close()
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(503) }))
 	defer bad.Close()
@@ -585,7 +587,7 @@ func TestExitText(t *testing.T) {
 	if exitText(errors.New("x")) != "wait error" {
 		t.Fatal(exitText(errors.New("x")))
 	}
-	err := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--", "exit").Run()
+	err := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHelperProcess$", "--", "exit").Run()
 	if got := exitText(err); got != "exit status 3" {
 		t.Fatalf("exitText = %q", got)
 	}
@@ -650,6 +652,10 @@ func runHelper(mode, addr, extra string) int {
 		onTerm(mode)
 		fmt.Print("line one\nline two\nlogin password=Hunter2-Correct-Horse\npartial")
 		return sleepForever()
+	case "print-key":
+		// A key whose END never arrives, then the process dies.
+		fmt.Print("before key\n" + beginPK + "\n" + bodyMarker + "\n" + bodyMarker + " still key\n")
+		return 3
 	case "print-env":
 		onTerm(mode)
 		for _, e := range os.Environ() {
