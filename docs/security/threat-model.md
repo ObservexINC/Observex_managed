@@ -81,7 +81,7 @@ The beacon endpoint is public by design and cannot authenticate end users.
 | R | Admin denies a change | Every change written to the audit log with both clocks; ProofChain hash chain | G10, G13 |
 | T | Cross-site request forgery or script injection in the Console | Same-site cookies, CSRF tokens, content security policy, output encoding | G10 |
 | D | Expensive queries | Query cost limits, timeouts, per-user concurrency | G10 |
-| I | Secrets leak through logs or error messages | Redacting log handler on every process; `logging.Secret` type; leak test | G00 |
+| I | Secrets leak through logs or error messages | Redacting log handler on every process (ADR 0007): sensitive keys, groups and struct fields dropped before rendering; JSON redacted member by member; escape-aware text rules; `logging.Secret` type; leak test and fuzz tests | G00, G01 |
 
 ### B6 Node to node, and B7 data at rest
 
@@ -136,14 +136,15 @@ record before and after, automatic stop on failure. Designed in G17.
 | I | The cluster CA key is read by the service or another user | Root-only file (`0600`); the node never reads it; `init` never overwrites it. Interim until the KMS/HSM design | G01, G04 |
 | I | The node key is read by other local users | `root:observex 0640` inside a `0750` directory | G01 |
 | I | A component inherits the supervisor's credentials | Components get a minimal fixed environment, never the supervisor's | G01 |
-| I | Secrets reach the journal through component output | Every component line passes through the redaction filter (ADR 0007) | G01 |
+| I | Secrets reach the journal through component output | Every component line passes through the redaction filter (ADR 0007); a multi-line PEM private key is dropped from its BEGIN to its END marker, and to the end of the process's output if END never comes (tested with every key type, split writes and CRLF; fuzzed) | G01 |
+| D | The node is started with a configuration that cannot work, or a check passes that the service would fail | `observex-node check` runs before every start as `ExecStartPre`, as the service user with the service's capability and sandbox; the installer stops on a failed check and shows why (tested under systemd) | G01 |
 | T | A configuration value injects NGINX directives | Every value validated against strict patterns; routes fixed in code; fuzz test on the generated file | G01 |
 | T | The installer overwrites a key or configuration in use | `install.sh` and `init` create files only when missing (exclusive create); the previous binary is kept | G01 |
 | T | Shell injection through installer arguments | Arguments checked against a strict character set before use | G01 |
 | D | A crashed NGINX leaves workers holding the ports | The supervisor kills the component's whole process group before restarting it (tested with SIGKILL) | G01 |
 | D | A crash loop hides an outage | Bounded backoff, then the component is marked failed; `/readyz`, `/health` and metrics report it | G01 |
 | R | Firewall changes are made silently | The node never changes the firewall; it runs only a fixed list of read-only commands and prints suggestions (DEV-03) | G01 |
-| I | Supervisor status or metrics are exposed to the network | Bound to loopback only (validated); the Front Door forwards `/node/health` and nothing else of the supervisor (tested) | G01 |
+| I | Supervisor status or metrics are exposed to the network | Bound to loopback only (validated); the Front Door forwards `/node/health` and nothing else of the supervisor. The live install test requires a healthy Front Door and the exact 503 answer for `/metrics`, so an unreachable node cannot pass for a protected one | G01 |
 
 Admin actions taken through the shell are recorded in the audit log where
 the Server can see them (G10).

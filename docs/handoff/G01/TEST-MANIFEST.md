@@ -1,5 +1,8 @@
 # G01 test manifest
 
+> This manifest describes `885480f`. Results for the QA fixes (`72d467d`)
+> are in [FIXES.md](FIXES.md).
+
 Code commit: `885480f` (G01 docs), on top of `0869717`, `3eabe9d` and `298eaad`.
 
 "Claude workspace" means Claude's cloud development workspace: a Linux
