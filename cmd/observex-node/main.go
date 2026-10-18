@@ -76,9 +76,17 @@ type env struct {
 	stderr io.Writer
 }
 
+// fail reports an error on stderr and returns code. Nothing useful can be
+// done when writing to stderr or stdout fails, so those errors are dropped
+// here and in say.
 func (e env) fail(code int, format string, args ...any) int {
-	fmt.Fprintf(e.stderr, "observex-node: "+format+"\n", args...)
+	_, _ = fmt.Fprintf(e.stderr, "observex-node: "+format+"\n", args...)
 	return code
+}
+
+// say writes a line of command output to stdout.
+func (e env) say(format string, args ...any) {
+	_, _ = fmt.Fprintf(e.stdout, format+"\n", args...)
 }
 
 func defaultConfigPath() string {
@@ -103,7 +111,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if err := fs.Parse(args); err != nil {
 			return exitUsage
 		}
-		fmt.Fprintln(stdout, "observex-node", version)
+		e.say("observex-node %s", version)
 		return exitOK
 	case "init":
 		return cmdInit(e, fs, configPath, args)
@@ -182,7 +190,7 @@ func cmdCheck(e env, cfg node.Config, running bool) int {
 	if err != nil {
 		return e.fail(exitFailure, "%v", err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }() // a leftover empty temporary directory is harmless
 	probe := cfg
 	probe.RunDir = tmp
 	if !running {
@@ -194,23 +202,23 @@ func cmdCheck(e env, cfg node.Config, running bool) int {
 	if err != nil {
 		return e.fail(exitUsage, "check failed: %v", err)
 	}
-	fmt.Fprintf(e.stdout, "configuration: ok (node %s)\n", cfg.NodeID)
-	fmt.Fprintf(e.stdout, "nginx: %s with %s\n", prep.Features.Version, orNone(prep.Features.TLSLibrary))
+	e.say("configuration: ok (node %s)", cfg.NodeID)
+	e.say("nginx: %s with %s", prep.Features.Version, orNone(prep.Features.TLSLibrary))
 	if cfg.FrontDoor.Plaintext {
-		fmt.Fprintln(e.stdout, "tls: off (plaintext)")
+		e.say("tls: off (plaintext)")
 	} else {
 		for _, l := range []string{"console", "agents"} {
 			s := prep.Certificates[l]
-			fmt.Fprintf(e.stdout, "tls %s: %s, valid until %s, groups %s\n", l, s.Subject, s.NotAfter.Format(time.DateOnly), strings.Join(prep.Groups[l], ":"))
+			e.say("tls %s: %s, valid until %s, groups %s", l, s.Subject, s.NotAfter.Format(time.DateOnly), strings.Join(prep.Groups[l], ":"))
 		}
 	}
 	if running {
-		fmt.Fprintln(e.stdout, "ports: not checked (-running)")
+		e.say("ports: not checked (-running)")
 	} else {
-		fmt.Fprintln(e.stdout, "ports: free")
+		e.say("ports: free")
 	}
 	for _, w := range prep.Warnings {
-		fmt.Fprintln(e.stdout, "warning:", w)
+		e.say("warning: %s", w)
 	}
 	return exitOK
 }
@@ -236,7 +244,7 @@ func cmdFirewall(e env, cfg node.Config, running, asJSON, skipPeers bool) int {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(r)
 	} else {
-		fmt.Fprint(e.stdout, r.Text())
+		_, _ = io.WriteString(e.stdout, r.Text())
 	}
 	if r.Problems > 0 {
 		return exitFailure
@@ -255,7 +263,7 @@ func fetch(ctx context.Context, url string) (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // the body is read; a close error loses nothing
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, b, err
 }
@@ -281,10 +289,10 @@ func cmdStatus(e env, cfg node.Config) int {
 func cmdHealth(e env, cfg node.Config) int {
 	code, _, err := fetch(e.ctx, "http://"+cfg.Supervisor.Listen+"/health")
 	if err != nil || code != http.StatusOK {
-		fmt.Fprintln(e.stdout, "not ready")
+		e.say("not ready")
 		return exitFailure
 	}
-	fmt.Fprintln(e.stdout, "ready")
+	e.say("ready")
 	return exitOK
 }
 
@@ -326,9 +334,11 @@ func cmdInit(e env, fs *flag.FlagSet, configPath *string, args []string) int {
 		id = sanitizeID(h)
 	}
 
-	// Configuration.
-	if _, err := os.Stat(*configPath); err == nil {
-		fmt.Fprintf(e.stdout, "configuration: %s exists; kept\n", *configPath)
+	// Configuration. The administrator names the file (-config); writing
+	// exactly there is the command's purpose.
+	cfgPath := filepath.Clean(*configPath)
+	if _, err := os.Stat(cfgPath); err == nil {
+		e.say("configuration: %s exists; kept", cfgPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return e.fail(exitFailure, "%v", err)
 	} else {
@@ -345,29 +355,41 @@ func cmdInit(e env, fs *flag.FlagSet, configPath *string, args []string) int {
 		if _, err := node.Parse(raw); err != nil {
 			return e.fail(exitUsage, "%v", err)
 		}
-		if err := os.MkdirAll(filepath.Dir(*configPath), 0o755); err != nil {
-			return e.fail(exitFailure, "%v", err)
+		// A missing directory is created like the installer's /etc/observex:
+		// 0750, in the service group, so the service can reach the file.
+		dir := filepath.Dir(cfgPath)
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return e.fail(exitFailure, "%v", err)
+			}
+			if gid >= 0 {
+				if err := os.Chown(dir, -1, gid); err != nil {
+					return e.fail(exitFailure, "set the group of %s: %v", dir, err)
+				}
+			}
 		}
-		f, err := os.OpenFile(*configPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640)
+		// 0640: the service group reads the configuration, which holds no
+		// secrets (keys are referenced by path).
+		f, err := os.OpenFile(cfgPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o640) // #nosec G302 -- group-readable on purpose, see above
 		if err != nil {
 			return e.fail(exitFailure, "%v", err)
 		}
 		_, werr := f.Write(raw)
 		cerr := f.Close()
 		if werr != nil || cerr != nil {
-			_ = os.Remove(*configPath)
-			return e.fail(exitFailure, "write %s failed", *configPath)
+			_ = os.Remove(cfgPath)
+			return e.fail(exitFailure, "write %s failed", cfgPath)
 		}
 		if gid >= 0 {
-			if err := os.Chown(*configPath, -1, gid); err != nil {
-				return e.fail(exitFailure, "set the group of %s: %v", *configPath, err)
+			if err := os.Chown(cfgPath, -1, gid); err != nil {
+				return e.fail(exitFailure, "set the group of %s: %v", cfgPath, err)
 			}
 		}
-		fmt.Fprintf(e.stdout, "configuration: wrote %s (node %s)\n", *configPath, id)
+		e.say("configuration: wrote %s (node %s)", cfgPath, id)
 	}
 
 	if *plaintext {
-		fmt.Fprintln(e.stdout, "tls: skipped (-plaintext)")
+		e.say("tls: skipped (-plaintext)")
 		return exitOK
 	}
 	if len(hosts) == 0 {
@@ -376,7 +398,7 @@ func cmdInit(e env, fs *flag.FlagSet, configPath *string, args []string) int {
 	files, err := pki.Init(*tlsDir, pki.Options{NodeName: id, Hosts: hosts})
 	switch {
 	case errors.Is(err, pki.ErrExists):
-		fmt.Fprintf(e.stdout, "tls: files in %s exist; kept\n", *tlsDir)
+		e.say("tls: files in %s exist; kept", *tlsDir)
 		return exitOK
 	case err != nil:
 		return e.fail(exitUsage, "%v", err)
@@ -388,8 +410,8 @@ func cmdInit(e env, fs *flag.FlagSet, configPath *string, args []string) int {
 			}
 		}
 	}
-	fmt.Fprintf(e.stdout, "tls: wrote the cluster CA and the node certificate to %s for %s\n", *tlsDir, strings.Join(hosts, ", "))
-	fmt.Fprintf(e.stdout, "tls: the CA key %s is readable by root only; keep a protected backup of it\n", files.CAKey)
+	e.say("tls: wrote the cluster CA and the node certificate to %s for %s", *tlsDir, strings.Join(hosts, ", "))
+	e.say("tls: the CA key %s is readable by root only; keep a protected backup of it", files.CAKey)
 	return exitOK
 }
 

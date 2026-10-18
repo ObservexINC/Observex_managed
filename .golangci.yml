@@ -3,6 +3,12 @@ version: "2"
 run:
   timeout: 5m
 
+# Report every finding: the default caps (3 of a kind, 50 per linter) hide
+# findings and make counts look smaller than they are.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   default: standard
   enable:
@@ -21,6 +27,14 @@ linters:
         linters:
           - gosec
           - unparam
+      # observex-node is run by the administrator, who names its files on
+      # the command line (-config, -tls-dir). Opening exactly those paths is
+      # the command's purpose, not a path traversal. Only rule G703, only
+      # this file; every other gosec rule still applies here.
+      - path: ^cmd/observex-node/main\.go$
+        linters:
+          - gosec
+        text: "^G703:"
 
 formatters:
   enable:

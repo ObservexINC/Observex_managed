@@ -11,9 +11,19 @@ COVERFILE := coverage.out
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOARCH    ?= amd64
 TARBALL   := dist/observex-managed-node-$(VERSION)-linux-$(GOARCH).tar.gz
-SHELL_SCRIPTS := packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/test-install.sh scripts/package.sh
+SHELL_SCRIPTS := packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/test-install.sh scripts/package.sh scripts/secrets-scan.sh
+MODULE    := github.com/ObservexINC/Observex_managed
 
-.PHONY: all build fmt-check vet test race cover fuzz ci-local ci lint vuln secrets licenses proto-lint shell-check package install-test clean
+# Check tools, pinned. "make tools" installs them through the Go module
+# proxy with checksum verification. Change a version only after a reviewed
+# green run with the new one.
+GOLANGCI_LINT_VERSION := v2.14.0
+GOVULNCHECK_VERSION   := v1.9.0
+GITLEAKS_VERSION      := v8.30.1
+GO_LICENSES_VERSION   := v1.6.0
+BUF_VERSION           := v1.74.0
+
+.PHONY: all build fmt-check vet test race cover fuzz ci-local ci tools lint vuln vuln-package secrets licenses proto-lint shell-check package install-test clean
 
 all: ci-local
 
@@ -39,6 +49,7 @@ cover:
 # Each fuzz target runs for FUZZTIME. Go runs one fuzz target per invocation.
 fuzz:
 	$(GO) test -run='^$$' -fuzz='^FuzzRedactString$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzRedactConfidential$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
 	$(GO) test -run='^$$' -fuzz='^FuzzDecode$$' -fuzztime=$(FUZZTIME) ./internal/platform/config
 	$(GO) test -run='^$$' -fuzz='^FuzzVerifyToken$$' -fuzztime=$(FUZZTIME) ./internal/platform/tlsx
 	$(GO) test -run='^$$' -fuzz='^FuzzParseTraceID$$' -fuzztime=$(FUZZTIME) ./internal/store
@@ -47,6 +58,7 @@ fuzz:
 	$(GO) test -run='^$$' -fuzz='^FuzzCheck$$' -fuzztime=$(FUZZTIME) ./internal/node/firewall
 	$(GO) test -run='^$$' -fuzz='^FuzzParseStat$$' -fuzztime=$(FUZZTIME) ./internal/node/selfmon
 	$(GO) test -run='^$$' -fuzz='^FuzzWriteText$$' -fuzztime=$(FUZZTIME) ./internal/node/selfmon
+	$(GO) test -run='^$$' -fuzz='^FuzzPrefixWriter$$' -fuzztime=$(FUZZTIME) ./internal/node/supervisor
 
 # Shell scripts: syntax check everywhere; shellcheck where installed (CI).
 shell-check:
@@ -68,17 +80,35 @@ ci-local: fmt-check vet build race cover shell-check
 # Full CI, as run by GitHub Actions and by Astra.
 ci: ci-local lint vuln secrets licenses proto-lint
 
+tools:
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	$(GO) install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+	$(GO) install github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION)
+	$(GO) install github.com/google/go-licenses@$(GO_LICENSES_VERSION)
+	$(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+
 lint:
 	golangci-lint run $(PKGS)
 
+# Source: the call graph of this module against the vulnerability database.
 vuln:
 	govulncheck $(PKGS)
 
-secrets:
-	gitleaks detect --source . --config .gitleaks.toml --no-banner --redact
+# The binary inside the node tarball, exactly as shipped.
+vuln-package: package
+	rm -rf dist/vuln && mkdir -p dist/vuln
+	tar -xzf $(TARBALL) -C dist/vuln
+	govulncheck -mode=binary dist/vuln/observex-managed-node-$(VERSION)-linux-$(GOARCH)/bin/observex-node
 
+# The whole git history (needs a full clone, not a shallow one).
+secrets:
+	scripts/secrets-scan.sh
+
+# Third-party licences (ADR 0005). This module's own packages are skipped:
+# ObserveX's licence is the owner's decision and, until it is made, all
+# rights are reserved (README). The packages they import are still checked.
 licenses:
-	go-licenses check $(PKGS) --disallowed_types=forbidden,restricted,unknown
+	go-licenses check $(PKGS) --ignore $(MODULE) --disallowed_types=forbidden,restricted,unknown
 
 proto-lint:
 	buf lint

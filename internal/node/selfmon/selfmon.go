@@ -174,26 +174,28 @@ func labelKey(ls []Label) string {
 	return b.String()
 }
 
-// WriteText writes the families in the Prometheus text format.
+// WriteText writes the families in the Prometheus text format. A
+// bufio.Writer keeps its first write error and returns it from Flush, so
+// the individual writes need no checks.
 func WriteText(w io.Writer, fams []Family) error {
 	bw := bufio.NewWriter(w)
 	for _, f := range fams {
-		fmt.Fprintf(bw, "# HELP %s %s\n# TYPE %s %s\n", f.Name, escapeHelp(f.Help), f.Name, f.Type)
+		_, _ = fmt.Fprintf(bw, "# HELP %s %s\n# TYPE %s %s\n", f.Name, escapeHelp(f.Help), f.Name, f.Type)
 		for _, s := range f.Samples {
-			bw.WriteString(f.Name)
+			_, _ = bw.WriteString(f.Name)
 			if len(s.Labels) > 0 {
-				bw.WriteByte('{')
+				_ = bw.WriteByte('{')
 				for i, l := range s.Labels {
 					if i > 0 {
-						bw.WriteByte(',')
+						_ = bw.WriteByte(',')
 					}
-					fmt.Fprintf(bw, `%s="%s"`, l.Name, escapeLabel(l.Value))
+					_, _ = fmt.Fprintf(bw, `%s="%s"`, l.Name, escapeLabel(l.Value))
 				}
-				bw.WriteByte('}')
+				_ = bw.WriteByte('}')
 			}
-			bw.WriteByte(' ')
-			bw.WriteString(formatValue(s.Value))
-			bw.WriteByte('\n')
+			_ = bw.WriteByte(' ')
+			_, _ = bw.WriteString(formatValue(s.Value))
+			_ = bw.WriteByte('\n')
 		}
 	}
 	return bw.Flush()

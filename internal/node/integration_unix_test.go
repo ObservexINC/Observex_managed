@@ -175,11 +175,15 @@ func (n *runningNode) consoleURL(p string) string {
 
 func get(t *testing.T, c *http.Client, url string) (int, string) {
 	t.Helper()
-	resp, err := c.Get(url)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err.Error()
 	}
-	defer resp.Body.Close()
+	resp, err := c.Do(req)
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
@@ -316,7 +320,12 @@ func TestAgentsListenerNeedsAClientCertificate(t *testing.T) {
 		tr := &http.Transport{Proxy: nil, DisableKeepAlives: true, TLSClientConfig: &tls.Config{
 			RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS13, Certificates: certs,
 		}}
-		resp, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Post(url, "application/x-protobuf", strings.NewReader("x"))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, strings.NewReader("x"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		resp, err := (&http.Client{Transport: tr, Timeout: 5 * time.Second}).Do(req)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}

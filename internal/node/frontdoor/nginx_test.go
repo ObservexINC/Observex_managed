@@ -34,7 +34,7 @@ func portSource(t *testing.T) func() string {
 		mu.Lock()
 		defer mu.Unlock()
 		for i := 0; i < 50; i++ {
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +79,7 @@ func startUpstream(t *testing.T, addr string, h http.HandlerFunc) *upstream {
 		u.mu.Unlock()
 		h(w, r)
 	})}
-	ln, err := net.Listen("tcp", addr)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,9 @@ func startNginx(t *testing.T, nginx string, c Config) *syncBuf {
 		t.Fatal(err)
 	}
 	out := &syncBuf{}
-	cmd := exec.Command(nginx, Args(c.RunDir, path)...)
+	// No context: the cleanup below stops NGINX gracefully (SIGQUIT), and
+	// kills it only if that fails.
+	cmd := exec.Command(nginx, Args(c.RunDir, path)...) //nolint:noctx // see above
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -181,12 +183,8 @@ func startNginx(t *testing.T, nginx string, c Config) *syncBuf {
 	})
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		resp, err := http.Get("http://" + c.ProbeListen + "/livez")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return out
-			}
+		if r := do(probeClient, http.MethodGet, "http://"+c.ProbeListen+"/livez", nil, nil); r.err == nil && r.code == 200 {
+			return out
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("NGINX did not start; output:\n%s", out.String())
@@ -218,8 +216,11 @@ type reply struct {
 	err    error
 }
 
+var probeClient = &http.Client{Timeout: 2 * time.Second}
+
+// do sends one request. Every client here has a timeout, which bounds it.
 func do(c *http.Client, method, url string, body []byte, hdr map[string]string) reply {
-	req, err := http.NewRequest(method, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), method, url, bytes.NewReader(body))
 	if err != nil {
 		return reply{err: err}
 	}
@@ -230,7 +231,7 @@ func do(c *http.Client, method, url string, body []byte, hdr map[string]string) 
 	if err != nil {
 		return reply{err: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return reply{code: resp.StatusCode, proto: resp.ProtoMajor, header: resp.Header, body: string(b)}
 }
@@ -435,8 +436,8 @@ func TestFrontDoorPlaintext(t *testing.T) {
 	if r := do(plain, "GET", "http://"+c.Console.Listen+"/node/health", nil, nil); r.code != 503 {
 		t.Fatalf("health with no supervisor: %+v", r)
 	}
-	var tlsErr error
-	if _, tlsErr = httpsClient(lf.ca, nil, 0).Get("https://" + c.Console.Listen + "/"); tlsErr == nil {
+	tlsErr := do(httpsClient(lf.ca, nil, 0), http.MethodGet, "https://"+c.Console.Listen+"/", nil, nil).err
+	if tlsErr == nil {
 		t.Fatal("plaintext listener answered TLS")
 	}
 	if errors.Is(tlsErr, context.DeadlineExceeded) {

@@ -22,15 +22,15 @@ type serverResult struct {
 	peerCN string
 }
 
-// handshake runs a TLS handshake over loopback TCP and returns the server's
-// error, the client's error, and what the server saw from the client.
-func handshake(t *testing.T, srvCfg, cliCfg *tls.Config) (srvErr, cliErr error, hello *tls.ClientHelloInfo, peerCN string) {
+// handshake runs a TLS handshake over loopback TCP and returns what the
+// server saw from the client, the server's error and the client's error.
+func handshake(t *testing.T, srvCfg, cliCfg *tls.Config) (hello *tls.ClientHelloInfo, peerCN string, srvErr, cliErr error) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	results := make(chan serverResult, 1)
 	go func() {
@@ -49,8 +49,8 @@ func handshake(t *testing.T, srvCfg, cliCfg *tls.Config) (srvErr, cliErr error, 
 			return base, nil
 		}
 		srv := tls.Server(conn, cfg)
-		defer srv.Close()
-		if res.err = srv.Handshake(); res.err != nil {
+		defer func() { _ = srv.Close() }()
+		if res.err = srv.HandshakeContext(t.Context()); res.err != nil {
 			return
 		}
 		if st := srv.ConnectionState(); len(st.PeerCertificates) > 0 {
@@ -60,19 +60,19 @@ func handshake(t *testing.T, srvCfg, cliCfg *tls.Config) (srvErr, cliErr error, 
 		_, res.err = srv.Read(buf)
 	}()
 
-	conn, err := net.DialTimeout("tcp", ln.Addr().String(), 5*time.Second)
+	conn, err := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(t.Context(), "tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	cli := tls.Client(conn, cliCfg)
-	cliErr = cli.Handshake()
+	cliErr = cli.HandshakeContext(t.Context())
 	if cliErr == nil {
 		_, cliErr = cli.Write([]byte{1})
 	}
 	res := <-results
 	_ = cli.Close()
-	return res.err, cliErr, res.hello, res.peerCN
+	return res.hello, res.peerCN, res.err, cliErr
 }
 
 func setup(t *testing.T) (*tlstest.CA, *tls.Config, *tls.Config) {
@@ -91,7 +91,7 @@ func setup(t *testing.T) (*tlstest.CA, *tls.Config, *tls.Config) {
 
 func TestMutualTLSSucceeds(t *testing.T) {
 	_, srv, cli := setup(t)
-	srvErr, cliErr, hello, peer := handshake(t, srv, cli)
+	hello, peer, srvErr, cliErr := handshake(t, srv, cli)
 	if srvErr != nil || cliErr != nil {
 		t.Fatalf("handshake failed: server=%v client=%v", srvErr, cliErr)
 	}
@@ -105,7 +105,7 @@ func TestMutualTLSSucceeds(t *testing.T) {
 
 func TestClientOffersHybridPostQuantum(t *testing.T) {
 	_, srv, cli := setup(t)
-	_, _, hello, _ := handshake(t, srv, cli)
+	hello, _, _, _ := handshake(t, srv, cli)
 	if hello == nil || len(hello.SupportedCurves) == 0 || hello.SupportedCurves[0] != tls.X25519MLKEM768 {
 		t.Fatalf("client curves = %v, want X25519MLKEM768 first", hello.SupportedCurves)
 	}
@@ -115,14 +115,14 @@ func TestHybridOnlyServerAcceptsObserveXClient(t *testing.T) {
 	_, srv, cli := setup(t)
 	pqOnly := srv.Clone()
 	pqOnly.CurvePreferences = []tls.CurveID{tls.X25519MLKEM768}
-	if srvErr, cliErr, _, _ := handshake(t, pqOnly, cli); srvErr != nil || cliErr != nil {
+	if _, _, srvErr, cliErr := handshake(t, pqOnly, cli); srvErr != nil || cliErr != nil {
 		t.Fatalf("hybrid-only handshake failed: server=%v client=%v", srvErr, cliErr)
 	}
 	// A classical-only client cannot reach a hybrid-only server, which shows
 	// the successful handshake above really negotiated the hybrid group.
 	classical := cli.Clone()
 	classical.CurvePreferences = []tls.CurveID{tls.X25519}
-	if srvErr, cliErr, _, _ := handshake(t, pqOnly, classical); srvErr == nil && cliErr == nil {
+	if _, _, srvErr, cliErr := handshake(t, pqOnly, classical); srvErr == nil && cliErr == nil {
 		t.Fatal("classical-only client connected to a hybrid-only server")
 	}
 }
@@ -130,7 +130,7 @@ func TestHybridOnlyServerAcceptsObserveXClient(t *testing.T) {
 func TestRejectsClientWithoutCertificate(t *testing.T) {
 	ca, srv, _ := setup(t)
 	noCert := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: ca.Pool, ServerName: serverName}
-	if srvErr, _, _, _ := handshake(t, srv, noCert); srvErr == nil {
+	if _, _, srvErr, _ := handshake(t, srv, noCert); srvErr == nil {
 		t.Fatal("server accepted a client with no certificate")
 	}
 }
@@ -142,7 +142,7 @@ func TestRejectsClientFromAnotherCA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if srvErr, _, _, _ := handshake(t, srv, cli); srvErr == nil {
+	if _, _, srvErr, _ := handshake(t, srv, cli); srvErr == nil {
 		t.Fatal("server accepted a client certificate from another CA")
 	}
 }
@@ -154,7 +154,7 @@ func TestClientRejectsServerFromAnotherCA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, cliErr, _, _ := handshake(t, srv, cli); cliErr == nil {
+	if _, _, _, cliErr := handshake(t, srv, cli); cliErr == nil {
 		t.Fatal("client accepted a server certificate from another CA")
 	}
 }
@@ -165,7 +165,7 @@ func TestClientRejectsWrongServerName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, cliErr, _, _ := handshake(t, srv, cli); cliErr == nil {
+	if _, _, _, cliErr := handshake(t, srv, cli); cliErr == nil {
 		t.Fatal("client accepted a certificate for another host name")
 	}
 }
@@ -177,7 +177,7 @@ func TestRejectsTLS12(t *testing.T) {
 		Certificates: []tls.Certificate{ca.Client(t, "old-agent")},
 		RootCAs:      ca.Pool, ServerName: serverName,
 	}
-	if srvErr, cliErr, _, _ := handshake(t, srv, old); srvErr == nil && cliErr == nil {
+	if _, _, srvErr, cliErr := handshake(t, srv, old); srvErr == nil && cliErr == nil {
 		t.Fatal("TLS 1.2 connection accepted")
 	}
 }

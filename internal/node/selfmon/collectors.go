@@ -139,7 +139,7 @@ func (p Processes) Collect(b *Batch) {
 		if _, err := strconv.Atoi(e.Name()); err != nil {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(root, e.Name(), "stat"))
+		raw, err := os.ReadFile(filepath.Join(root, e.Name(), "stat")) // #nosec G304 -- /proc/<pid>/stat; the name is all digits (checked above)
 		if err != nil {
 			continue // the process ended between the listing and the read
 		}
@@ -195,7 +195,8 @@ func (h Host) Collect(b *Batch) {
 	if root == "" {
 		root = "/proc"
 	}
-	if raw, err := os.ReadFile(filepath.Join(root, "loadavg")); err != nil {
+	// root is /proc; tests point it at a fixture directory.
+	if raw, err := os.ReadFile(filepath.Join(root, "loadavg")); err != nil { // #nosec G304 -- see above
 		b.Errorf("cannot read loadavg: %v", err)
 	} else if f := strings.Fields(string(raw)); len(f) >= 3 {
 		for i, w := range []string{"1m", "5m", "15m"} {
@@ -206,7 +207,7 @@ func (h Host) Collect(b *Batch) {
 	} else {
 		b.Errorf("cannot parse loadavg")
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "meminfo"))
+	raw, err := os.ReadFile(filepath.Join(root, "meminfo")) // #nosec G304 -- /proc, as above
 	if err != nil {
 		b.Errorf("cannot read meminfo: %v", err)
 		return

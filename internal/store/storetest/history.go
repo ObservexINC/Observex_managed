@@ -10,7 +10,7 @@ import (
 
 // HistoryStore runs the System History contract against stores from open.
 func HistoryStore(t *testing.T, open func(t *testing.T) store.HistoryStore) {
-	at := func(min int) time.Time { return T0.Add(time.Duration(min) * time.Minute) }
+	at := func(minute int) time.Time { return T0.Add(time.Duration(minute) * time.Minute) }
 	change := func(e store.EntityID, kind string, valid, record int, attrs map[string]string) store.Change {
 		return store.Change{Entity: e, Kind: kind, Attributes: attrs, Stamp: clock.Stamp{Valid: at(valid), Record: at(record)}}
 	}

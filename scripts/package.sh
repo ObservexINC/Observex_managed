@@ -32,7 +32,10 @@ install -m 0644 packaging/linux/observex-node.service "$STAGE/systemd/"
 install -m 0644 packaging/linux/README.md "$STAGE/README.md"
 printf '%s\n' "$VERSION" >"$STAGE/VERSION"
 chmod 0644 "$STAGE/VERSION"
-(cd "$STAGE" && find . -type f ! -name SHA256SUMS | LC_ALL=C sort | sed 's|^\./||' | xargs sha256sum >SHA256SUMS)
+# The list is written next to the stage, then moved in, so the pipeline
+# never reads the file it writes.
+(cd "$STAGE" && find . -type f ! -name SHA256SUMS | LC_ALL=C sort | sed 's|^\./||' | xargs sha256sum) >"$OUT/stage/SHA256SUMS.tmp"
+mv "$OUT/stage/SHA256SUMS.tmp" "$STAGE/SHA256SUMS"
 chmod 0644 "$STAGE/SHA256SUMS"
 
 TAR=$OUT/$NAME.tar.gz

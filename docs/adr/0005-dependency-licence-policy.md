@@ -21,6 +21,11 @@ dependency is redistributed to them.
 
 At G00 the module has no dependencies outside the Go standard library.
 
+`make licenses` skips this module's own packages (`--ignore
+github.com/ObservexINC/Observex_managed`): their licence is the open
+decision below, so the gate cannot judge them. The packages they import are
+still checked, so every third-party dependency added later goes through it.
+
 ## Open
 
 ObserveX's own licence is akash's decision and is not set in this repository

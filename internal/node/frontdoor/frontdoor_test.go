@@ -353,10 +353,9 @@ func nginxBinary(t *testing.T) string {
 // liveConfig is a configuration with real certificate files in a temporary
 // directory, on free loopback ports.
 type liveFiles struct {
-	dir                 string
-	ca                  *tlstest.CA
-	caFile, crt, key    string
-	clientCrt, clientKy string
+	dir              string
+	ca               *tlstest.CA
+	caFile, crt, key string
 }
 
 func newLiveFiles(t *testing.T) liveFiles {

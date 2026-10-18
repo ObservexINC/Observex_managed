@@ -10,8 +10,8 @@ import (
 
 // SearchStore runs the SearchStore contract against stores from open.
 func SearchStore(t *testing.T, open func(t *testing.T) store.SearchStore) {
-	doc := func(id string, min int, body string, fields map[string]string) store.Document {
-		return store.Document{ID: id, Time: T0.Add(time.Duration(min) * time.Minute), Body: body, Fields: fields}
+	doc := func(id string, minute int, body string, fields map[string]string) store.Document {
+		return store.Document{ID: id, Time: T0.Add(time.Duration(minute) * time.Minute), Body: body, Fields: fields}
 	}
 	logs := []store.Document{
 		doc("a", 1, "Checkout failed: connection pool exhausted", map[string]string{"service": "checkout", "level": "error"}),

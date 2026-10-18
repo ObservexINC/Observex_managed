@@ -234,11 +234,19 @@ func TestInfoAndHandler(t *testing.T) {
 	r.Register(Info("observex_node_build_info", "Build of the node software.", L("version", "0.1.0"), L("go_version", "go1.24.7")))
 	srv := httptest.NewServer(r.Handler())
 	defer srv.Close()
-	resp, err := http.Get(srv.URL)
-	if err != nil {
-		t.Fatal(err)
+	request := func(method string) *http.Response {
+		req, err := http.NewRequestWithContext(t.Context(), method, srv.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
 	}
-	defer resp.Body.Close()
+	resp := request(http.MethodGet)
+	defer func() { _ = resp.Body.Close() }()
 	var b bytes.Buffer
 	_, _ = b.ReadFrom(resp.Body)
 	if resp.Header.Get("Content-Type") != "text/plain; version=0.0.4; charset=utf-8" {
@@ -247,10 +255,7 @@ func TestInfoAndHandler(t *testing.T) {
 	if !strings.Contains(b.String(), `observex_node_build_info{version="0.1.0",go_version="go1.24.7"} 1`) {
 		t.Fatalf("body:\n%s", b.String())
 	}
-	post, err := http.Post(srv.URL, "text/plain", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	post := request(http.MethodPost)
 	_ = post.Body.Close()
 	if post.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("POST = %d", post.StatusCode)

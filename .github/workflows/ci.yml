@@ -44,19 +44,15 @@ jobs:
           go-version: "1.27.x"
           check-latest: true
       # Tools are installed through the Go module proxy with checksum
-      # verification. Versions are unpinned until the first green run;
-      # pinning them is a G01 follow-up recorded in the G00 handoff.
+      # verification, at the versions pinned in the Makefile.
       - name: Install tools
-        run: |
-          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          go install github.com/zricethezav/gitleaks/v8@latest
-          go install github.com/google/go-licenses@latest
-          go install github.com/bufbuild/buf/cmd/buf@latest
+        run: make tools
       - name: Lint
         run: make lint
-      - name: Vulnerabilities
+      - name: Vulnerabilities (source)
         run: make vuln
+      - name: Vulnerabilities (the binary in the node tarball)
+        run: make vuln-package VERSION=ci
       - name: Secrets
         run: make secrets
       - name: Licences

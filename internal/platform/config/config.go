@@ -120,7 +120,7 @@ func readLimited(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: open: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: a close error loses nothing
 	data, err := io.ReadAll(io.LimitReader(f, MaxSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("config: read: %w", err)

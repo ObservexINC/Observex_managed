@@ -296,7 +296,9 @@ func Render(c Config, f Features) ([]byte, error) {
 func Check(ctx context.Context, nginx, prefix, confPath string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, nginx, CheckArgs(prefix, confPath)...).CombinedOutput()
+	// nginx is the configured NGINX binary, a validated absolute path; the
+	// arguments are fixed apart from two validated paths.
+	out, err := exec.CommandContext(ctx, nginx, CheckArgs(prefix, confPath)...).CombinedOutput() // #nosec G204 -- see above
 	if err != nil {
 		return fmt.Errorf("frontdoor: nginx -t failed: %s", strings.TrimSpace(string(out)))
 	}

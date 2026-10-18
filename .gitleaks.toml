@@ -3,10 +3,27 @@ title = "ObserveX gitleaks configuration"
 [extend]
 useDefault = true
 
-# One exception: the invented secrets that the logging leak test uses as
-# fixtures. Nothing else may be added to that file (see its header).
-[allowlist]
+# Exceptions are narrow and each one says why. Do not add paths that cover
+# whole directories (such as docs/) or disable a rule.
+
+# The invented secrets that the logging leak test uses as fixtures. Nothing
+# else may be added to that file (see its header).
+[[allowlists]]
 description = "Invented secrets used only as redaction test fixtures"
 paths = [
   '''^internal/platform/logging/secrets_fixture_test\.go$''',
+]
+
+# X25519MLKEM768 is the public name of the hybrid post-quantum TLS
+# key-exchange group (an NGINX ssl_ecdh_curve value), not a secret. The
+# generic-api-key rule reads "Key exchange: X25519MLKEM768" as a key
+# (QA finding G01-13, docs/adr/0010-managed-node-g01.md:45 in commit
+# 885480fcf4207c19086315b434e00e3f9579c94d). This applies to that one rule,
+# and only when the whole matched secret is exactly this name.
+[[allowlists]]
+description = "Public TLS key-exchange group name X25519MLKEM768"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = [
+  '''^X25519MLKEM768$''',
 ]

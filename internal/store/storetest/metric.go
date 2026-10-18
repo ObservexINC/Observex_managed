@@ -14,9 +14,9 @@ func MetricStore(t *testing.T, open func(t *testing.T) store.MetricStore) {
 	errs := store.Series{Name: "http_requests_total", Labels: store.Labels{"service": "checkout", "code": "500"}}
 	cart := store.Series{Name: "http_requests_total", Labels: store.Labels{"service": "cart", "code": "200"}}
 	cpu := store.Series{Name: "cpu_utilisation", Labels: store.Labels{"host": "node-1"}}
-	at := func(min int) time.Time { return T0.Add(time.Duration(min) * time.Minute) }
-	sample := func(s store.Series, min int, v float64) store.Sample {
-		return store.Sample{Series: s, Point: store.Point{Time: at(min), Value: v}}
+	at := func(minute int) time.Time { return T0.Add(time.Duration(minute) * time.Minute) }
+	sample := func(s store.Series, minute int, v float64) store.Sample {
+		return store.Sample{Series: s, Point: store.Point{Time: at(minute), Value: v}}
 	}
 
 	t.Run("write then query returns sorted series and points", func(t *testing.T) {
