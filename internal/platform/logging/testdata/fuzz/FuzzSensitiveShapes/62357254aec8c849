@@ -1,0 +1,6 @@
+go test fuzz v1
+byte('A')
+int16(-101)
+byte('9')
+uint16(25)
+string("0")

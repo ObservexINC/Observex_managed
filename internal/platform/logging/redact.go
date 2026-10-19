@@ -191,6 +191,12 @@ func RedactString(s string) string {
 }
 
 func redactString(s string, sensitive func(string) bool) string {
+	return redactStringAt(s, sensitive, 0)
+}
+
+// redactStringAt is redactString for text found inside depth levels of
+// JSON strings (see redactStrings).
+func redactStringAt(s string, sensitive func(string) bool, depth int) string {
 	if s == "" {
 		return s
 	}
@@ -200,7 +206,7 @@ func redactString(s string, sensitive func(string) bool) string {
 	if out, ok := redactJSON(s, sensitive); ok {
 		return out
 	}
-	t := redactText(redactMembers(s, sensitive))
+	t := redactText(redactMembers(s, sensitive, depth))
 	// The rules can turn invalid JSON into valid JSON (rarely); give that
 	// the JSON treatment too, so the function stays idempotent.
 	if out, ok := redactJSON(t, sensitive); ok {

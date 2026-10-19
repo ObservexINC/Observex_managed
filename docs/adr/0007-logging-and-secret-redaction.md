@@ -17,8 +17,12 @@ any secret value or fragment.
     classified on their full original text, before redaction or the 64 KiB
     bound shortens the key that is shown, also when a string key is boxed
     in interfaces or pointers (`map[any]V`); a key made of structs, arrays,
-    interfaces or pointers is sensitive when any string in it is. Keys of
-    an opaque type (`logging.Secret`, `slog.LogValuer`) are never read.
+    interfaces or pointers is sensitive when any string in it is. Such a key
+    is read within the walk's bounds (below); a key the bounds stop from
+    being read in full counts as sensitive, because what was not read
+    cannot show that the value is safe. Pointer cycles in a key are read
+    once. Keys of an opaque type (`logging.Secret`, `slog.LogValuer`) are
+    never read; an opaque part of a key does not make it sensitive.
     Keys that look the same once shortened are shown with " #2", " #3" ...,
     so no entry hides another. Built-in secret words match anywhere in a
     key; names added with `WithSensitiveKeys`, and the short names `pwd`,
@@ -52,10 +56,21 @@ any secret value or fragment.
     closing quote shows, decoded and classified, and a sensitive name has
     its value replaced; a name whose opening quote is more than 64 KiB away
     counts as sensitive. Unquoted names before `:` or `=` with an object or
-    array value are handled the same way. The second look has a work budget
-    of a few times the length of the text; text it cannot finish within it
-    is replaced as a whole. Valid JSON skips it, so its output stays valid
-    JSON.
+    array value are handled the same way. Where such a value ends is not
+    taken from the quoting either: a value with no quote ends where its
+    brackets close (when they match); a value holding quotes runs to the
+    end of the text that holds it (the whole text, or the JSON string it is
+    written in), unless that JSON string is valid JSON on its own. In text
+    whose quoting is broken any quote in the value may be an unescaped
+    quote of its content, and a cut can remove whatever would show that the
+    value goes on, so no reading of the rest can prove where it ends; a
+    bracket inside a string therefore never ends a value early. The second
+    look has a work budget of a few times the length of the text; text it
+    cannot finish within it is replaced as a whole. Valid JSON skips it, so
+    its output stays valid JSON; but a string in valid JSON can hold JSON
+    whose own quoting is broken, so every string whose content holds
+    quotes is decoded and redacted as text of its own, down to three levels
+    of encoding, and written back as a JSON string when it changed.
   - **Text.** Message text, string values and error messages are scrubbed
     for credentials in URLs and DSNs, bearer and basic credentials,
     key=value secrets, PEM private keys, JSON Web Tokens, AWS access key IDs

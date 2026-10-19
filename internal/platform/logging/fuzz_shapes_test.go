@@ -15,7 +15,8 @@ import (
 // reach: explicit secret types behind pointers, interfaces and unexported
 // fields; map keys around MaxString; composite map keys around the item,
 // depth and node bounds; JSON around MaxJSONRedact, nested, escaped, cut
-// short, double-encoded or inside other text. The invented
+// short, double-encoded or inside other text; broken quoting before values
+// whose strings hold brackets and escapes. The invented
 // marker must never reach the log line, the line must stay valid JSON, and
 // redacting a string twice must give the same result.
 func FuzzSensitiveShapes(f *testing.F) {
@@ -153,6 +154,32 @@ func FuzzSensitiveShapes(f *testing.F) {
 			default: // nodes: the word is the last of MaxNodes+off values
 				v = oneEntry(nodeKey(logging.MaxNodes-3858+off, word), m)
 			}
+		case 10: // broken quoting, then a value whose strings hold brackets and escapes
+			names := []string{string(name) + ":", "{" + string(name) + ":"}
+			if word[0] < utf8.RuneSelf && name[1] == word[0] {
+				names = append(names, "{"+fmt.Sprintf(`"\u%04x`, word[0])+string(name[2:])+":")
+			}
+			if strings.IndexFunc(word, notKeyRune) < 0 {
+				names = append(names, word+": ", word+"=")
+			}
+			values := append(append([]string{}, recoveryValues...),
+				`{"pad":"a"}","value":"M"}`, `{"pad":"a"],"value":"M"}`, `{pad: "a", value: M}`)
+			nm := names[int(delta>>2&0xff)%len(names)]
+			value := strings.ReplaceAll(fix(values[int(cut)%len(values)]), "M", m)
+			text := recoveryPrefixes[d%len(recoveryPrefixes)] + nm + value
+			if strings.HasPrefix(nm, "{") {
+				text += "}"
+			}
+			if delta&1 != 0 {
+				text += ` tail "x" end`
+			}
+			text = encodeForm(text, int(depth/8)%4)
+			if delta&2 != 0 { // cut inside the marker
+				n := 4 + int(cut)%(len(m)-4)
+				secret = m[:n]
+				text = text[:strings.Index(text, m)+n]
+			}
+			v = text
 		}
 		out := logLine(t, v)
 		if strings.Contains(out, secret) {
@@ -171,7 +198,7 @@ func FuzzSensitiveShapes(f *testing.F) {
 }
 
 // shapes is how many shapes FuzzSensitiveShapes builds.
-const shapes = 10
+const shapes = 11
 
 // oneEntry returns a map holding value under key.
 func oneEntry(key reflect.Value, value string) any {
