@@ -66,8 +66,9 @@ const (
 //     than walked.
 //   - Map keys and JSON member names are classified on their full original
 //     text, before the text rules or the length bound shorten the key that
-//     is shown. Keys that become equal when shown get a " #2", " #3" ...
-//     suffix, so no entry hides another.
+//     is shown. A composite key that the bounds stop from being read in
+//     full counts as sensitive. Keys that become equal when shown get a
+//     " #2", " #3" ... suffix, so no entry hides another.
 //   - Cycles become CycleMarker. Depth, item and total-size bounds apply.
 type sanitizer struct {
 	sensitive func(string) bool
@@ -294,7 +295,7 @@ func (s *sanitizer) structValue(rv reflect.Value, t reflect.Type, depth int) any
 type mapEntry struct {
 	raw       string // the key's full text (string keys) or its shown form
 	key       string // the key as shown: redacted and bounded
-	sensitive bool   // decided on the full original text, never on key alone
+	sensitive bool   // decided on the full original key, never on key alone
 	val       reflect.Value
 }
 
@@ -302,14 +303,16 @@ type mapEntry struct {
 // never read to show or classify them.
 func opaque(t reflect.Type) bool { return t == secretType || t.Implements(logValuerType) }
 
-// keyForms returns a map key's full text, the form shown, and whether it
-// names a secret. The decision is made on the original text, before the
-// text rules or the display bound shorten anything: a string key is
+// keyForms returns a map key's full text, the form shown, and whether its
+// value must be hidden. The decision is made on the original key, before
+// the text rules or the display bound shorten anything: a string key is
 // classified whole, also when it is boxed in interfaces or pointers
 // (map[any]V), and a key made of structs, arrays, interfaces or pointers
-// is sensitive when any string in it is. A key of an opaque type
-// (logging.Secret, a slog.LogValuer) is shown by the sanitizer and its
-// content is never read.
+// is sensitive when any string in it is. A composite key that cannot be
+// read in full within the depth, item and node bounds counts as
+// sensitive: what was not read cannot show that the value is safe. A key
+// of an opaque type (logging.Secret, a slog.LogValuer) is shown by the
+// sanitizer and its content is never read.
 func (s *sanitizer) keyForms(k reflect.Value, depth int) (raw, shown string, sensitive bool) {
 	u := k
 	for i := 0; i < MaxDepth && (u.Kind() == reflect.Interface || u.Kind() == reflect.Pointer) && !u.IsNil() && !opaque(u.Type()); i++ {
@@ -321,37 +324,89 @@ func (s *sanitizer) keyForms(k reflect.Value, depth int) (raw, shown string, sen
 		return raw, shown, s.sensitive(raw) || s.sensitive(shown)
 	}
 	shown = fmt.Sprint(s.value(k, depth+1))
-	budget := MaxNodes
-	return shown, shown, s.sensitive(shown) || s.keyHolds(k, 0, &budget)
+	w := keyWalk{sensitive: s.sensitive, budget: MaxNodes, onPath: map[keyPtr]bool{}}
+	return shown, shown, s.sensitive(shown) || w.holds(k, 0) != keyClean
 }
 
-// keyHolds reports whether a string inside a composite key names a
-// secret, reading each string in full. Opaque types are not read; the walk
-// is bounded like the sanitizer's.
-func (s *sanitizer) keyHolds(v reflect.Value, depth int, budget *int) bool {
-	*budget--
-	if !v.IsValid() || depth > MaxDepth || *budget < 0 || opaque(v.Type()) {
-		return false
+// keyVerdict is what reading a composite map key found.
+type keyVerdict uint8
+
+const (
+	keyClean     keyVerdict = iota // read in full: no string in it names a secret
+	keySensitive                   // a string in it names a secret
+	keyUnknown                     // a bound stopped the reading: treated as sensitive
+)
+
+// keyPtr identifies a pointer on the current path of a key walk.
+type keyPtr struct {
+	addr uintptr
+	typ  reflect.Type
+}
+
+// keyWalk reads every string in a composite map key in full, within the
+// sanitizer's bounds: MaxDepth (counted as the sanitizer counts it:
+// pointers, struct fields and array elements go one level deeper,
+// interfaces do not), MaxItems fields or elements, and MaxNodes values.
+// Reaching a bound before a decision gives keyUnknown. Opaque types are
+// not read. A pointer already on the path is a cycle: its content is
+// being read further up, so it adds nothing new.
+type keyWalk struct {
+	sensitive func(string) bool
+	budget    int
+	onPath    map[keyPtr]bool
+}
+
+func (w *keyWalk) holds(v reflect.Value, depth int) keyVerdict {
+	if !v.IsValid() {
+		return keyClean
+	}
+	w.budget--
+	if w.budget < 0 || depth > MaxDepth {
+		return keyUnknown
+	}
+	if opaque(v.Type()) {
+		return keyClean
 	}
 	switch v.Kind() {
 	case reflect.String:
-		return s.sensitive(v.String())
-	case reflect.Interface, reflect.Pointer:
-		return !v.IsNil() && s.keyHolds(v.Elem(), depth+1, budget)
-	case reflect.Struct:
-		for i := 0; i < v.NumField() && i < MaxItems; i++ {
-			if s.keyHolds(v.Field(i), depth+1, budget) {
-				return true
-			}
+		if w.sensitive(v.String()) {
+			return keySensitive
 		}
+	case reflect.Interface:
+		if !v.IsNil() {
+			return w.holds(v.Elem(), depth)
+		}
+	case reflect.Pointer:
+		if v.IsNil() {
+			return keyClean
+		}
+		p := keyPtr{v.Pointer(), v.Type()}
+		if w.onPath[p] {
+			return keyClean
+		}
+		w.onPath[p] = true
+		defer delete(w.onPath, p)
+		return w.holds(v.Elem(), depth+1)
+	case reflect.Struct:
+		return w.items(v.NumField(), v.Field, depth)
 	case reflect.Array:
-		for i := 0; i < v.Len() && i < MaxItems; i++ {
-			if s.keyHolds(v.Index(i), depth+1, budget) {
-				return true
-			}
+		return w.items(v.Len(), v.Index, depth)
+	}
+	return keyClean // numbers, booleans, channels: no string to read
+}
+
+// items reads the first MaxItems fields or elements; more than that is
+// keyUnknown unless a sensitive string was found first.
+func (w *keyWalk) items(n int, at func(int) reflect.Value, depth int) keyVerdict {
+	for i := 0; i < n; i++ {
+		if i == MaxItems {
+			return keyUnknown
+		}
+		if r := w.holds(at(i), depth+1); r != keyClean {
+			return r
 		}
 	}
-	return false
+	return keyClean
 }
 
 func (s *sanitizer) mapValue(rv reflect.Value, depth int) any {

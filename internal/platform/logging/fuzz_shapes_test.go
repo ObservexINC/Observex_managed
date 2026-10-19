@@ -3,6 +3,7 @@ package logging_test
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -12,8 +13,9 @@ import (
 
 // FuzzSensitiveShapes builds the shapes that random short strings rarely
 // reach: explicit secret types behind pointers, interfaces and unexported
-// fields; map keys around MaxString; JSON around MaxJSONRedact, nested,
-// escaped, cut short, double-encoded or inside other text. The invented
+// fields; map keys around MaxString; composite map keys around the item,
+// depth and node bounds; JSON around MaxJSONRedact, nested, escaped, cut
+// short, double-encoded or inside other text. The invented
 // marker must never reach the log line, the line must stay valid JSON, and
 // redacting a string twice must give the same result.
 func FuzzSensitiveShapes(f *testing.F) {
@@ -26,6 +28,7 @@ func FuzzSensitiveShapes(f *testing.F) {
 		}
 	}
 	f.Add(uint8(2), int16(-9), uint8(0), uint16(0), "client_secret")
+	f.Add(uint8(9), int16(2), uint8(2), uint16(0), "secret") // nodes, one past the bound
 	f.Fuzz(func(t *testing.T, shape uint8, delta int16, depth uint8, cut uint16, word string) {
 		const m = "ZZFUZZSHAPEMARKERZZ"
 		if !utf8.ValidString(word) || len(word) > 64 || !logging.IsSensitiveKey(word) || strings.ContainsAny(strings.ToUpper(word), "Z") {
@@ -140,6 +143,16 @@ func FuzzSensitiveShapes(f *testing.F) {
 				text = text[:strings.Index(text, m)+n]
 			}
 			v = text
+		case 9: // a composite map key with the word just below, at or past a bound
+			off := int(delta%3+3)%3 - 1 // -1, 0 or +1
+			switch d % 3 {
+			case 0: // items: the word is the last of MaxItems+off elements
+				v = oneEntry(stringArray(logging.MaxItems+off, word), m)
+			case 1: // depth: the word inside MaxDepth+off wrappers
+				v = oneEntry(wrappedKey(logging.MaxDepth+off, word), m)
+			default: // nodes: the word is the last of MaxNodes+off values
+				v = oneEntry(nodeKey(logging.MaxNodes-3858+off, word), m)
+			}
 		}
 		out := logLine(t, v)
 		if strings.Contains(out, secret) {
@@ -158,7 +171,14 @@ func FuzzSensitiveShapes(f *testing.F) {
 }
 
 // shapes is how many shapes FuzzSensitiveShapes builds.
-const shapes = 9
+const shapes = 10
+
+// oneEntry returns a map holding value under key.
+func oneEntry(key reflect.Value, value string) any {
+	mp := reflect.MakeMap(reflect.MapOf(key.Type(), reflect.TypeOf("")))
+	mp.SetMapIndex(key, reflect.ValueOf(value))
+	return mp.Interface()
+}
 
 // notKeyRune reports characters an unquoted key in this test may not hold.
 func notKeyRune(r rune) bool {
