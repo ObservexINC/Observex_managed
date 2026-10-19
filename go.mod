@@ -9,6 +9,7 @@ go 1.27.0
 
 require (
 	github.com/apache/cassandra-gocql-driver/v2 v2.1.2
+	github.com/opensearch-project/opensearch-go/v4 v4.8.1
 	github.com/parquet-go/parquet-go v0.32.0
 	go.etcd.io/etcd/api/v3 v3.7.2
 	go.etcd.io/etcd/client/v3 v3.7.2
@@ -67,6 +68,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

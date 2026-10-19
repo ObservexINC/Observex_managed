@@ -23,6 +23,7 @@ const (
 	OpenSearch         = "OBSERVEX_TEST_OPENSEARCH"         // http(s)://host:port
 	OpenSearchUsername = "OBSERVEX_TEST_OPENSEARCH_USERNAME"
 	OpenSearchPassword = "OBSERVEX_TEST_OPENSEARCH_PASSWORD" //nolint:gosec // G101: the name of an environment variable, not a credential
+	OpenSearchCA       = "OBSERVEX_TEST_OPENSEARCH_CA"       // PEM file of the CA for https
 )
 
 // Address returns the value of env, or skips (or fails, when engines are

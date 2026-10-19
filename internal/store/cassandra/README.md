@@ -76,8 +76,9 @@ Each test works in a keyspace of its own and drops it afterwards. Without
   cluster's CA comes with node integration (G06).
 - A write is all-or-nothing for invalid input, not for an engine failure in
   the middle of a call (see above).
-- Times between 1678 and 2262 (Unix nanoseconds in an int64); others are
-  `ErrInvalid`.
+- Times between 1678 and 2262 (Unix nanoseconds in an int64), and label
+  values in valid UTF-8 (Cassandra's `text`); others are `ErrInvalid`. The
+  fake checks neither.
 - Series of one metric share 16 partitions of `metric_series`; a metric with
   millions of series makes them large. Cardinality limits come with
   Adaptive Telemetry (G13).

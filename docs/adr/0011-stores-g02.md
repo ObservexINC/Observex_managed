@@ -77,6 +77,27 @@ its own under `internal/store`, with a README.
   The driver's warnings and errors go through the redacting handler. No TLS
   yet (G06).
 
+### SearchStore: OpenSearch 3 (`internal/store/opensearch`)
+
+- One OpenSearch index per SearchStore index, named from a prefix and the
+  name (a SHA-256 when the name is not a valid index name), created on first
+  use with a strict mapping. The `_id` is a SHA-256 of the document ID.
+- The contract's text search is substring matching of lowercased words
+  (what the fake does), not OpenSearch's analysed full-text matching. The
+  adapter keeps the contract: the body lowercased in Go goes into a
+  `wildcard` field in overlapping chunks (Lucene caps one value at 32,766
+  bytes), each word is a wildcard query, and every hit is checked against the
+  whole body before it is returned. Analysed full-text search, if a module
+  needs it, is an addition to the interface with its own contract test.
+- Filters are exact through a keyword field of SHA-256 hashes of each name
+  and value. Times are `date_nanos` (1970 to 2262).
+- Basic authentication with the password as a `logging.Secret`, and HTTPS
+  with a configured CA; tested against OpenSearch 3.9.0 with its security
+  plugin.
+- Both engine adapters require valid UTF-8 text, which the fakes do not
+  check; this and the time ranges each engine can hold are recorded in the
+  packages' READMEs.
+
 ### Real engines in tests
 
 The contract suite runs against each real engine through the same test

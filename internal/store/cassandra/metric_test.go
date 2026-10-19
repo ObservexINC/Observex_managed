@@ -162,6 +162,10 @@ func TestExtremeTimesAndPrecision(t *testing.T) {
 	if err := m.WriteSamples(ctx, []store.Sample{bad}); !errors.Is(err, store.ErrInvalid) {
 		t.Fatalf("time before 1678: %v", err)
 	}
+	badLabel := store.Sample{Series: store.Series{Name: "edge", Labels: store.Labels{"k": "\xff"}}, Point: store.Point{Time: at(1), Value: 1}}
+	if err := m.WriteSamples(ctx, []store.Sample{samples[0], badLabel}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("label that is not UTF-8: %v", err)
+	}
 }
 
 func TestConcurrentWriters(t *testing.T) {

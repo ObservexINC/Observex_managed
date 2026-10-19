@@ -28,6 +28,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 
@@ -224,6 +225,11 @@ func (m *MetricStore) WriteSamples(ctx context.Context, samples []store.Sample) 
 		}
 		if !storable(s.Point.Time) {
 			return store.Invalid("sample for %q has a time outside 1678 to 2262, which the MetricStore cannot hold", s.Series.Name)
+		}
+		for k, v := range s.Series.Labels {
+			if !utf8.ValidString(v) {
+				return store.Invalid("label %q of %q is not valid UTF-8, which Cassandra text requires", k, s.Series.Name)
+			}
 		}
 	}
 	series := map[string]store.Series{}
