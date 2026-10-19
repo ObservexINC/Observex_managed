@@ -81,7 +81,8 @@ The beacon endpoint is public by design and cannot authenticate end users.
 | R | Admin denies a change | Every change written to the audit log with both clocks; ProofChain hash chain | G10, G13 |
 | T | Cross-site request forgery or script injection in the Console | Same-site cookies, CSRF tokens, content security policy, output encoding | G10 |
 | D | Expensive queries | Query cost limits, timeouts, per-user concurrency | G10 |
-| I | Secrets leak through logs or error messages | Redacting log handler on every process (ADR 0007): sensitive keys, groups and struct fields dropped before rendering; JSON redacted member by member; escape-aware text rules; `logging.Secret` type; leak test and fuzz tests | G00, G01 |
+| I | Secrets leak through logs or error messages | Redacting log handler on every process (ADR 0007): sensitive keys, groups and struct fields dropped before rendering; `logging.Secret` opaque by type wherever it is, unexported fields included; keys classified on their full text before they are shortened; JSON redacted member by member, and JSON over 1 MiB, malformed, truncated or embedded gets a structural pass that replaces whole sensitive values; work limits fail closed (text over 8 MiB is replaced); escape-aware text rules; leak test and fuzz tests, including generated shapes at the size boundaries | G00, G01 |
+| I | A size or depth limit silently downgrades redaction | Every limit either stops showing data (markers) or replaces the whole value; none hands a value to a weaker rule (Astra's follow-up F02, F03) | G01 |
 
 ### B6 Node to node, and B7 data at rest
 

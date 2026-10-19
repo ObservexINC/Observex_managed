@@ -1,8 +1,10 @@
 # G01 handoff to Codex Astra
 
-> **QA fix round:** Astra's report of 17 October 2026 is answered in
-> [FIXES.md](FIXES.md), which supersedes this file's validation steps,
-> check counts (the live systemd test now has 28 checks) and known limits.
+> **QA fix rounds:** Astra's report of 17 October 2026 is answered in
+> [FIXES.md](FIXES.md) and his revalidation of 18 October in
+> [FOLLOWUP.md](FOLLOWUP.md); together they supersede this file's
+> validation steps, check counts (the live systemd test now has 28 checks)
+> and known limits.
 
 Goal: G01, node platform (Node Supervisor, Front Door, firewall check,
 self-monitoring, installer). Status: **implemented and tested in Claude's
