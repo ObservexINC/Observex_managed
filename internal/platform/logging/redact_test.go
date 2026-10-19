@@ -121,7 +121,8 @@ func TestRedactStringCases(t *testing.T) {
 		{"redis://:onlypass@cache:6379", "redis://:" + Redacted + "@cache:6379"},
 		{"Bearer abcdefghijk", "Bearer " + Redacted},
 		{"password=abc def", "password=" + Redacted + " def"},
-		{`"password": "a b c"`, `"password": ` + Redacted},
+		// A quoted member keeps its quotes, so JSON-like text stays JSON-like.
+		{`"password": "a b c"`, `"password": "` + Redacted + `"`},
 		{"APIToken:xyz123", "APIToken:" + Redacted},
 		{"truncated -----BEGIN RSA PRIVATE KEY-----\nMIIabc", "truncated " + Redacted},
 	}

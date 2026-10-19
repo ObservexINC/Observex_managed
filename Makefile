@@ -50,6 +50,8 @@ cover:
 fuzz:
 	$(GO) test -run='^$$' -fuzz='^FuzzRedactString$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
 	$(GO) test -run='^$$' -fuzz='^FuzzRedactConfidential$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzSensitiveShapes$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzPairsMatchExpression$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
 	$(GO) test -run='^$$' -fuzz='^FuzzDecode$$' -fuzztime=$(FUZZTIME) ./internal/platform/config
 	$(GO) test -run='^$$' -fuzz='^FuzzVerifyToken$$' -fuzztime=$(FUZZTIME) ./internal/platform/tlsx
 	$(GO) test -run='^$$' -fuzz='^FuzzParseTraceID$$' -fuzztime=$(FUZZTIME) ./internal/store

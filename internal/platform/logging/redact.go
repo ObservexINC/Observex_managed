@@ -27,6 +27,8 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Redacted replaces every secret value in log output.
@@ -84,6 +86,13 @@ func IsSensitiveKey(key string) bool {
 type rule struct {
 	re   *regexp.Regexp
 	repl string
+	// fn, when set, does the rule's work instead of re and repl.
+	fn func(string) string
+	// need lists literals of which every match contains at least one (in
+	// lower case when fold is set). Text holding none of them cannot match,
+	// so the expression is not run on it: large text is mostly ordinary.
+	need []string
+	fold bool
 }
 
 // Quoted values in key=value text. Each form consumes escape sequences, so
@@ -107,34 +116,76 @@ const (
 var rules = []rule{
 	// PEM private keys, including encrypted and PKCS#8 variants. A key whose
 	// END line never comes is redacted to the end of the text.
-	{regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)`), Redacted},
+	{re: regexp.MustCompile(`-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)`), repl: Redacted,
+		need: []string{"PRIVATE KEY-----"}},
 	// Credentials in URLs and DSNs: scheme://user:password@host
-	{regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://[^:/?#\s@]*):[^@/\s]*@`), "${1}:" + Redacted + "@"},
+	{re: regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://[^:/?#\s@]*):[^@/\s]*@`), repl: "${1}:" + Redacted + "@",
+		need: []string{"://"}},
 	// Authorization schemes followed by a credential.
-	{regexp.MustCompile(`(?i)\b(bearer|basic|token|digest)(\s+)[A-Za-z0-9._~+/=\-]{6,}`), "${1}${2}" + Redacted},
+	{re: regexp.MustCompile(`(?i)\b(bearer|basic|token|digest)(\s+)[A-Za-z0-9._~+/=\-]{6,}`), repl: "${1}${2}" + Redacted,
+		need: []string{"bearer", "basic", "token", "digest"}, fold: true},
 	// key=value, key: value, "key":"value" and \"key\":\"value\" pairs whose
 	// key ends in a secret word (password, db_password, APIToken,
-	// client_secret and so on).
-	{regexp.MustCompile(`(?i)\b([A-Za-z0-9_\-]*(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|session[_-]?key|authorization|credentials?))(\\?"?\s*[=:]\s*)(\[REDACTED\]|` +
-		doubleQuoted + `|` + dquoted + `|` + squoted + `|` + unquoted + `)`), "${1}${2}" + Redacted},
+	// client_secret and so on): see redactPairs.
+	{fn: redactPairs,
+		need: []string{"passw", "passphrase", "pwd", "secret", "token", "api", "access", "private", "session", "authorization", "credential"}, fold: true},
 	// JSON Web Tokens.
-	{regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}`), Redacted},
+	{re: regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}`), repl: Redacted,
+		need: []string{"eyJ"}},
 	// AWS access key IDs.
-	{regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), Redacted},
+	{re: regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), repl: Redacted,
+		need: []string{"AKIA", "ASIA"}},
 	// Password hashes: bcrypt, argon2, scrypt and SHA-crypt formats.
-	{regexp.MustCompile(`\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}`), Redacted},
-	{regexp.MustCompile(`\$(?:argon2(?:id|i|d)|scrypt|[56])\$[^\s"']+`), Redacted},
+	{re: regexp.MustCompile(`\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}`), repl: Redacted, need: []string{"$2"}},
+	{re: regexp.MustCompile(`\$(?:argon2(?:id|i|d)|scrypt|[56])\$[^\s"']+`), repl: Redacted, need: []string{"$"}},
+}
+
+// mayMatch reports whether r can match s. lower is s in ASCII lower case,
+// or "" when s is not all ASCII: Unicode case folding (the Kelvin sign
+// matches k under (?i)) is then left to the expression itself.
+func (r rule) mayMatch(s, lower string) bool {
+	if len(r.need) == 0 || (r.fold && lower == "") {
+		return true
+	}
+	in := s
+	if r.fold {
+		in = lower
+	}
+	for _, n := range r.need {
+		if strings.Contains(in, n) {
+			return true
+		}
+	}
+	return false
+}
+
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return ""
+		}
+	}
+	return strings.ToLower(s)
 }
 
 // MaxJSONRedact is the largest whole-JSON string that is parsed and
-// redacted member by member. Larger strings use the text rules only.
+// redacted member by member, then written back in canonical form. Larger
+// or invalid JSON-like text gets the bounded structural pass
+// (redactMembers), which replaces the whole value of every sensitive
+// member without parsing the document.
 const MaxJSONRedact = 1 << 20
 
-// RedactString removes secret-looking text from s. A string that is a whole
-// JSON object or array is parsed and redacted by member name, then written
-// back in canonical form (sorted keys); anything else is scrubbed with the
-// text rules. It is safe on any input, and applying it twice gives the same
-// result as applying it once.
+// RedactString removes secret-looking text from s:
+//
+//   - text longer than MaxRedactInput is replaced as a whole;
+//   - a whole JSON object or array of at most MaxJSONRedact bytes is
+//     parsed, redacted by member name and written back with sorted keys;
+//   - anything else (larger, truncated or malformed JSON, JSON inside other
+//     text or inside JSON strings, and plain text) first has the whole
+//     value of every sensitive member replaced, then the text rules.
+//
+// It is safe on any input, and applying it twice gives the same result as
+// applying it once.
 func RedactString(s string) string {
 	return redactString(s, IsSensitiveKey)
 }
@@ -143,11 +194,14 @@ func redactString(s string, sensitive func(string) bool) string {
 	if s == "" {
 		return s
 	}
+	if len(s) > MaxRedactInput {
+		return tooLarge(len(s))
+	}
 	if out, ok := redactJSON(s, sensitive); ok {
 		return out
 	}
-	t := redactText(s)
-	// Text rules can turn invalid JSON into valid JSON (rarely); give that
+	t := redactText(redactMembers(s, sensitive))
+	// The rules can turn invalid JSON into valid JSON (rarely); give that
 	// the JSON treatment too, so the function stays idempotent.
 	if out, ok := redactJSON(t, sensitive); ok {
 		return out
@@ -156,10 +210,149 @@ func redactString(s string, sensitive func(string) bool) string {
 }
 
 func redactText(s string) string {
+	lower := asciiLower(s)
 	for _, r := range rules {
-		s = r.re.ReplaceAllString(s, r.repl)
+		if !r.mayMatch(s, lower) {
+			continue
+		}
+		if r.fn != nil {
+			s = r.fn(s)
+		} else {
+			s = r.re.ReplaceAllString(s, r.repl)
+		}
 	}
 	return s
+}
+
+// Pairs whose key ends in a secret word. redactPairs evaluates
+//
+//	(?i)\b([A-Za-z0-9_\-]*(?:words))(\\?"?\s*[=:]\s*)(value)
+//
+// from each '=' or ':' backwards (the separator, then the word, then the
+// rest of the key) and matches only the value with a regular expression.
+// Run as one expression, the leading [A-Za-z0-9_\-]* is tried at every
+// offset of a long word, which made large text slow.
+var (
+	pairWords = []string{
+		"password", "passwd", "passphrase", "pwd", "secret", "token",
+		"apikey", "api_key", "api-key", "accesskey", "access_key", "access-key",
+		"privatekey", "private_key", "private-key", "sessionkey", "session_key", "session-key",
+		"authorization", "credentials", "credential",
+	}
+	// (?i) as in the expression: it matters only for [REDACTED] itself.
+	pairValue = regexp.MustCompile(`(?i)^(?:\[REDACTED\]|` + doubleQuoted + `|` + dquoted + `|` + squoted + `|` + unquoted + `)`)
+)
+
+// foldEq reports whether r matches the ASCII character c under (?i):
+// simple case folding, so the Kelvin sign matches k and the long s
+// matches s, as in package regexp.
+func foldEq(r rune, c byte) bool {
+	want := rune(c)
+	if r == want {
+		return true
+	}
+	for f := unicode.SimpleFold(want); f != want; f = unicode.SimpleFold(f) {
+		if f == r {
+			return true
+		}
+	}
+	return false
+}
+
+// wordBefore returns where a secret word that ends at k starts, not
+// looking before lo.
+func wordBefore(s string, k, lo int) (int, bool) {
+	for _, w := range pairWords {
+		p, j := k, len(w)-1
+		for ; j >= 0 && p > lo; j-- {
+			r, size := utf8.DecodeLastRuneInString(s[lo:p])
+			if !foldEq(r, w[j]) {
+				break
+			}
+			p -= size
+		}
+		if j < 0 {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func isSpaceByte(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r' }
+
+func isKeyChar(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+}
+
+func isWordByte(c byte) bool { return isKeyChar(c) && c != '-' }
+
+// boundaryAt reports a word boundary (\b) before s[i].
+func boundaryAt(s string, i int) bool {
+	before := i > 0 && isWordByte(s[i-1])
+	after := i < len(s) && isWordByte(s[i])
+	return before != after
+}
+
+// redactPairs replaces the value of every key=value pair whose key ends in
+// a secret word. A value that is already a quoted [REDACTED] is kept, so
+// redacting stays idempotent and JSON-like text keeps its quotes.
+func redactPairs(s string) string {
+	var b strings.Builder
+	last := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] != '=' && s[i] != ':' {
+			continue
+		}
+		// Backwards: \s* then an optional " then an optional \.
+		k := i
+		for k > last && isSpaceByte(s[k-1]) {
+			k--
+		}
+		if k > last && s[k-1] == '"' {
+			k--
+		}
+		if k > last && s[k-1] == '\\' {
+			k--
+		}
+		word, ok := wordBefore(s, k, last)
+		if !ok {
+			continue
+		}
+		// The key is the run of key characters that ends with the word,
+		// from its first word boundary (\b[A-Za-z0-9_\-]*).
+		start := word
+		for start > last && isKeyChar(s[start-1]) {
+			start--
+		}
+		for start < word && !boundaryAt(s, start) {
+			start++
+		}
+		if !boundaryAt(s, start) {
+			continue
+		}
+		sepEnd := i + 1
+		for sepEnd < len(s) && isSpaceByte(s[sepEnd]) {
+			sepEnd++
+		}
+		v := pairValue.FindStringIndex(s[sepEnd:])
+		if v == nil {
+			continue
+		}
+		valEnd := sepEnd + v[1]
+		if value := s[sepEnd:valEnd]; value != Redacted && strings.Trim(value, `\"`) == Redacted {
+			i = valEnd - 1 // already a quoted [REDACTED]
+			continue
+		}
+		b.WriteString(s[last:sepEnd])
+		b.WriteString(Redacted)
+		last = valEnd
+		i = valEnd - 1
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // redactJSON redacts s when it is a whole JSON object or array.
