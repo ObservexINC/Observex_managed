@@ -292,35 +292,74 @@ func (s *sanitizer) structValue(rv reflect.Value, t reflect.Type, depth int) any
 }
 
 type mapEntry struct {
-	raw       string // the key as given (strings) or as rendered (other kinds)
+	raw       string // the key's full text (string keys) or its shown form
 	key       string // the key as shown: redacted and bounded
-	sensitive bool   // decided on raw and on key, never on key alone
+	sensitive bool   // decided on the full original text, never on key alone
 	val       reflect.Value
 }
 
-// keyForms returns a map key's original text and the form shown. Plain
-// string keys are classified on their full text; a key whose type decides
-// how it is shown (logging.Secret, a slog.LogValuer) and keys of other
-// kinds are rendered by the sanitizer first.
-func (s *sanitizer) keyForms(k reflect.Value, depth int) (raw, shown string) {
-	t := k.Type()
-	if k.Kind() == reflect.String && t != secretType && !t.Implements(logValuerType) {
-		raw = k.String()
-		return raw, s.text(raw)
+// opaque reports types that decide how they are shown: their content is
+// never read to show or classify them.
+func opaque(t reflect.Type) bool { return t == secretType || t.Implements(logValuerType) }
+
+// keyForms returns a map key's full text, the form shown, and whether it
+// names a secret. The decision is made on the original text, before the
+// text rules or the display bound shorten anything: a string key is
+// classified whole, also when it is boxed in interfaces or pointers
+// (map[any]V), and a key made of structs, arrays, interfaces or pointers
+// is sensitive when any string in it is. A key of an opaque type
+// (logging.Secret, a slog.LogValuer) is shown by the sanitizer and its
+// content is never read.
+func (s *sanitizer) keyForms(k reflect.Value, depth int) (raw, shown string, sensitive bool) {
+	u := k
+	for i := 0; i < MaxDepth && (u.Kind() == reflect.Interface || u.Kind() == reflect.Pointer) && !u.IsNil() && !opaque(u.Type()); i++ {
+		u = u.Elem()
+	}
+	if u.Kind() == reflect.String && !opaque(u.Type()) {
+		raw = u.String()
+		shown = s.text(raw)
+		return raw, shown, s.sensitive(raw) || s.sensitive(shown)
 	}
 	shown = fmt.Sprint(s.value(k, depth+1))
-	return shown, shown
+	budget := MaxNodes
+	return shown, shown, s.sensitive(shown) || s.keyHolds(k, 0, &budget)
+}
+
+// keyHolds reports whether a string inside a composite key names a
+// secret, reading each string in full. Opaque types are not read; the walk
+// is bounded like the sanitizer's.
+func (s *sanitizer) keyHolds(v reflect.Value, depth int, budget *int) bool {
+	*budget--
+	if !v.IsValid() || depth > MaxDepth || *budget < 0 || opaque(v.Type()) {
+		return false
+	}
+	switch v.Kind() {
+	case reflect.String:
+		return s.sensitive(v.String())
+	case reflect.Interface, reflect.Pointer:
+		return !v.IsNil() && s.keyHolds(v.Elem(), depth+1, budget)
+	case reflect.Struct:
+		for i := 0; i < v.NumField() && i < MaxItems; i++ {
+			if s.keyHolds(v.Field(i), depth+1, budget) {
+				return true
+			}
+		}
+	case reflect.Array:
+		for i := 0; i < v.Len() && i < MaxItems; i++ {
+			if s.keyHolds(v.Index(i), depth+1, budget) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *sanitizer) mapValue(rv reflect.Value, depth int) any {
 	entries := make([]mapEntry, 0, rv.Len())
 	it := rv.MapRange()
 	for it.Next() {
-		raw, shown := s.keyForms(it.Key(), depth)
-		entries = append(entries, mapEntry{
-			raw: raw, key: shown, val: it.Value(),
-			sensitive: s.sensitive(raw) || s.sensitive(shown),
-		})
+		raw, shown, sensitive := s.keyForms(it.Key(), depth)
+		entries = append(entries, mapEntry{raw: raw, key: shown, val: it.Value(), sensitive: sensitive})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].key != entries[j].key {

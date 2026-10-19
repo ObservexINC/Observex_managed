@@ -161,3 +161,76 @@ func TestKeysThatLookEqualWhenShownKeepTheirValues(t *testing.T) {
 		t.Fatal("the ordinary value was lost")
 	}
 }
+
+// --- R01: keys boxed in interfaces or pointers, and composite keys ---
+
+func TestBoxedMapKeysAreClassifiedInFull(t *testing.T) {
+	const m = "ZZBOXEDKEYMARKERZZ"
+	const frag = "password"
+	for _, n := range []int{
+		logging.MaxString - len(frag) - 1,
+		logging.MaxString - len(frag),
+		logging.MaxString - len(frag) + 1,
+		logging.MaxString + 1,
+	} {
+		key := strings.Repeat("x", n) + frag
+		k := key
+		shapes := map[string]any{
+			"map[string]":     map[string]string{key: m},
+			"map[any]":        map[any]string{key: m},
+			"map[any] nested": map[any]any{"ok": 1, key: map[string]string{"v": m}},
+			"map[*string]":    map[*string]string{&k: m},
+			"map[any] to ptr": map[any]string{&k: m},
+			"struct key":      map[struct{ A, B string }]string{{A: "id", B: key}: m},
+			"array key":       map[[2]string]string{{"id", key}: m},
+			"unexported key":  map[struct{ a any }]string{{a: key}: m},
+		}
+		for name, v := range shapes {
+			t.Run(fmt.Sprintf("%s/%d", name, len(key)), func(t *testing.T) {
+				mustNotContain(t, logLine(t, v), m)
+			})
+		}
+	}
+}
+
+func TestBoxedKeysWithCustomAndDisplayRemovedNames(t *testing.T) {
+	const m = "ZZBOXEDCUSTOMMARKERZZ"
+	// Custom keys match the whole (normalised) key, so they are tested
+	// without padding; built-in words match anywhere and are padded above.
+	opt := logging.WithSensitiveKeys("employee_ref")
+	ref := "Employee-Ref"
+	mustNotContain(t, logLine(t, map[any]string{"Employee-Ref": m}, opt), m)
+	mustNotContain(t, logLine(t, map[*string]string{&ref: m}, opt), m)
+	mustNotContain(t, logLine(t, map[struct{ A any }]string{{A: "employee.ref"}: m}, opt), m)
+	for _, key := range []string{
+		"eyJ" + "hbGciOiJub25lIn0." + "eyJ" + "zdWIiOiIxMjM0In0." + "password_signature",
+		"https://user:password@db.example.test/x",
+	} {
+		mustNotContain(t, logLine(t, map[any]string{key: m}), m)
+	}
+}
+
+func TestOpaqueKeysStayOpaqueWhenBoxed(t *testing.T) {
+	const m = "ZZOPAQUEKEYMARKERZZ"
+	s := logging.Secret(m)
+	tok := opaqueToken(m)
+	for name, v := range map[string]any{
+		"Secret in any":        map[any]int{s: 1},
+		"*Secret in any":       map[any]int{&s: 1},
+		"LogValuer in any":     map[any]int{tok: 1},
+		"Secret in struct key": map[struct{ k logging.Secret }]int{{s}: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mustNotContain(t, logLine(t, v), m)
+		})
+	}
+}
+
+func TestBoxedKeysThatLookEqualKeepTheirValues(t *testing.T) {
+	long := strings.Repeat("z", logging.MaxString)
+	out := logLine(t, map[any]string{long + "a": "first-value", long + "b": "second-value", long + "password": "ZZHIDDENZZ"})
+	if !strings.Contains(out, "first-value") || !strings.Contains(out, "second-value") {
+		t.Fatal("an entry hid another")
+	}
+	mustNotContain(t, out, "ZZHIDDENZZ")
+}
