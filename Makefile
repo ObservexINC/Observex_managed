@@ -7,6 +7,9 @@
 GO        ?= go
 PKGS      := ./...
 FUZZTIME  ?= 30s
+# Go minimizes each newly interesting input for up to 60 s by default, and the
+# execution counter stops meanwhile, so a 30 s run could fuzz for only a few
+# seconds. One second keeps the runs fuzzing.
 FUZZMINIMIZETIME ?= 1s
 COVERFILE := coverage.out
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -63,6 +66,9 @@ fuzz:
 	$(GO) test -run='^$$' -fuzz='^FuzzParseStat$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/selfmon
 	$(GO) test -run='^$$' -fuzz='^FuzzWriteText$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/selfmon
 	$(GO) test -run='^$$' -fuzz='^FuzzPrefixWriter$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/supervisor
+	$(GO) test -run='^$$' -fuzz='^FuzzWALRecords$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/store/tracestore
+	$(GO) test -run='^$$' -fuzz='^FuzzBlockIndex$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/store/tracestore
+	$(GO) test -run='^$$' -fuzz='^FuzzBlockReader$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/store/tracestore
 
 # Shell scripts: syntax check everywhere; shellcheck where installed (CI).
 shell-check:

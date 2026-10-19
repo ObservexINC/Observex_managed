@@ -31,6 +31,34 @@ its own under `internal/store`, with a README.
   the redacting handler (ADR 0007).
 - Old revisions are compacted after an hour.
 
+### TraceStore v0: our own node-local store (`internal/store/tracestore`)
+
+- Writes go to a write-ahead log (one CRC-32C record per call, synced before
+  the call returns) and an in-memory head. Full or old heads are written in
+  the background as immutable blocks: written under a temporary name,
+  synced, renamed into place, and only then are their log segments deleted.
+- Each span carries the sequence number of its write; the highest wins
+  across log, heads and blocks, which is how a rewrite replaces a span.
+- A block holds its spans sorted by trace, start and span ID, and an index:
+  a trace-ID bloom filter, a trace index (one entry per trace, so a lookup
+  reads only that trace's rows) and a service-and-time index (per service,
+  span starts sorted by time) for `FindTraces`.
+- Block format: **Parquet** (Zstandard, nanosecond timestamps, readable by
+  any Parquet tool), as row T7 says. The simpler segment format (the log's
+  encoding, uncompressed) is implemented too and benchmarked against it on
+  100,000 spans: Parquet is about four times smaller on disk (about 70 bytes
+  per span against 270) and slower to read (a trace in about 0.5 ms against
+  0.04 ms; a 6,000-trace query in about 0.4 s against 0.2 s). Disk is the
+  larger cost of keeping traces, and half a millisecond per trace is well
+  within what an interactive view needs, so v0 keeps Parquet; the segment
+  format stays selectable for further comparison.
+- Recovery cuts a torn record at the end of the log, removes unfinished
+  blocks and replays only what no block holds. A crash test kills a writer
+  process at random moments and checks that every acknowledged write
+  survives and the write in flight is there whole or not at all.
+- While too many heads wait for the flusher, writers wait; if the last flush
+  failed, writes are refused rather than filling memory.
+
 ### Real engines in tests
 
 The contract suite runs against each real engine through the same test
@@ -55,3 +83,6 @@ the TraceStore need no external engine and always run.
 ## What would change this decision
 
 - Member TLS and membership changes (G03) replace the loopback-only rule.
+- If trace queries over long ranges become the bottleneck, the TraceStore
+  needs per-trace summaries in its index, or the segment format's faster
+  reads; retention and compaction come with the goal that needs them.
