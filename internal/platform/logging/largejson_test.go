@@ -176,7 +176,17 @@ func TestEscapedCharactersInMemberNames(t *testing.T) {
 func TestMalformedQuotingWithEscapedNames(t *testing.T) {
 	const m = "ZZCOMBOMARKERZZ"
 	prefixes := []string{"", `prefix " `, `a "b" c" `, `"unterminated `, `5": `}
-	names := []string{"credentials", "cred\u0065ntials", "\u0063redentials", "api\u005fkey", "x_token", "CREDENTIALS", "pass\u0077ord"}
+	// Raw strings: the escapes reach the JSON text as written.
+	names := []string{"credentials", `cred\u0065ntials`, `\u0063redentials`, `api\u005fkey`, "x_token", "CREDENTIALS", `pass\u0077ord`}
+	escaped := 0
+	for _, n := range names {
+		if strings.Contains(n, `\u`) {
+			escaped++
+		}
+	}
+	if escaped != 4 {
+		t.Fatalf("%d names hold an escape; want 4 (fixtures must keep their escapes)", escaped)
+	}
 	values := []string{`{"value":"M"}`, `["M",{"v":"M"}]`, `"M"`, `{"a":{"b":["M"]}}`}
 	failures := 0
 	for _, prefix := range prefixes {
