@@ -15,8 +15,14 @@ any secret value or fragment.
     `WithGroup("credentials")` redacts everything below it, exactly as
     `slog.Group("credentials", ...)` does. Map keys and member names are
     classified on their full original text, before redaction or the 64 KiB
-    bound shortens the key that is shown; keys that look the same once
-    shortened are shown with " #2", " #3" ..., so no entry hides another.
+    bound shortens the key that is shown, also when a string key is boxed
+    in interfaces or pointers (`map[any]V`); a key made of structs, arrays,
+    interfaces or pointers is sensitive when any string in it is. Keys of
+    an opaque type (`logging.Secret`, `slog.LogValuer`) are never read.
+    Keys that look the same once shortened are shown with " #2", " #3" ...,
+    so no entry hides another. Built-in secret words match anywhere in a
+    key; names added with `WithSensitiveKeys`, and the short names `pwd`,
+    `pass`, `dsn`, `auth`, `jwt` and `bearer`, match only the whole key.
   - **Types.** A `logging.Secret` is `[REDACTED]` wherever it is found:
     behind pointers and interfaces, in collections, and in unexported
     fields, where reflection could otherwise read the string under it. The
@@ -39,7 +45,17 @@ any secret value or fragment.
     sensitive name: string, number, object or array, and to the end of its
     text when it never closes. Names are decoded (`\u` escapes included)
     before they are classified. The pass is linear in the text for each
-    level it follows.
+    level it follows. Text that is still not valid JSON afterwards may have
+    broken quoting (a stray quote shifts every string after it), so it gets
+    a second look that does not trust the quoting: from every `:` the
+    quoted name before it is read backwards, at the encoding level its
+    closing quote shows, decoded and classified, and a sensitive name has
+    its value replaced; a name whose opening quote is more than 64 KiB away
+    counts as sensitive. Unquoted names before `:` or `=` with an object or
+    array value are handled the same way. The second look has a work budget
+    of a few times the length of the text; text it cannot finish within it
+    is replaced as a whole. Valid JSON skips it, so its output stays valid
+    JSON.
   - **Text.** Message text, string values and error messages are scrubbed
     for credentials in URLs and DSNs, bearer and basic credentials,
     key=value secrets, PEM private keys, JSON Web Tokens, AWS access key IDs

@@ -169,3 +169,92 @@ func TestEscapedCharactersInMemberNames(t *testing.T) {
 		mustNotContain(t, logging.RedactString(doc), m)
 	}
 }
+
+// --- R02: malformed quoting combined with escaped names, structured
+// values, truncation and encodings ---
+
+func TestMalformedQuotingWithEscapedNames(t *testing.T) {
+	const m = "ZZCOMBOMARKERZZ"
+	prefixes := []string{"", `prefix " `, `a "b" c" `, `"unterminated `, `5": `}
+	names := []string{"credentials", "cred\u0065ntials", "\u0063redentials", "api\u005fkey", "x_token", "CREDENTIALS", "pass\u0077ord"}
+	values := []string{`{"value":"M"}`, `["M",{"v":"M"}]`, `"M"`, `{"a":{"b":["M"]}}`}
+	failures := 0
+	for _, prefix := range prefixes {
+		for _, name := range names {
+			for _, value := range values {
+				inner := prefix + `{"` + name + `":` + strings.ReplaceAll(value, "M", m) + `}`
+				for level := 0; level <= 2; level++ {
+					text := inner
+					for i := 0; i < level; i++ {
+						q, _ := json.Marshal(text)
+						text = string(q)
+					}
+					if level > 0 {
+						text = "body=" + text + " end"
+					}
+					for _, cut := range []bool{false, true} {
+						in := text
+						if cut {
+							in = text[:strings.Index(text, m)+5]
+						}
+						got := logging.RedactString(in)
+						if strings.Contains(got, m) || strings.Contains(got, m[:5]) {
+							failures++
+							if failures <= 5 {
+								t.Errorf("leak: level %d, cut %v: %q -> %q", level, cut, in, got)
+							}
+							continue
+						}
+						if logging.RedactString(got) != got {
+							t.Errorf("not idempotent: %q", in)
+						}
+						if out := logLine(t, in); strings.Contains(out, m[:5]) {
+							t.Errorf("leak through the handler: %q", in)
+						}
+					}
+				}
+			}
+		}
+	}
+	if failures > 0 {
+		t.Fatalf("%d leaking combinations", failures)
+	}
+}
+
+func TestStrayQuoteThenUnquotedKeys(t *testing.T) {
+	const m = "ZZUNQUOTEDMARKERZZ"
+	for _, in := range []string{
+		`prefix " credentials: {value: ` + m + `}`,
+		`prefix " token=[` + m + `, x]`,
+		`prefix " api_key : {"v":"` + m + `"} tail`,
+		`prefix " secret={` + m, // never closes: to the end
+	} {
+		got := logging.RedactString(in)
+		mustNotContain(t, got, m)
+		if logging.RedactString(got) != got {
+			t.Errorf("not idempotent: %q", in)
+		}
+	}
+}
+
+func TestValidJSONStaysValidJSON(t *testing.T) {
+	// Valid JSON over the parse limit stays valid JSON: recovery runs only
+	// on text that is not valid JSON, and the first pass replaces values
+	// with quoting of their own level. The note holds encoded JSON with a
+	// sensitive member whose object never closes.
+	const m = "ZZVALIDMARKERZZ"
+	doc := `{"pad":"` + strings.Repeat("p", logging.MaxJSONRedact) + `","note":"see \"token\": {` + m + `","time":"12:30","x":"a\":b"}`
+	if !json.Valid([]byte(doc)) {
+		t.Fatal("test document must be valid JSON")
+	}
+	got := logging.RedactString(doc)
+	mustNotContain(t, got, m)
+	if !json.Valid([]byte(got)) {
+		t.Fatal("redacted document is no longer JSON")
+	}
+	for _, want := range []string{`"time":"12:30"`, `"x":"a\":b"`, strings.Repeat("p", 1000)} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("lost %.40s", want)
+		}
+	}
+}

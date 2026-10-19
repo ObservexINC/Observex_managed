@@ -1,7 +1,8 @@
 package logging
 
 import (
-	"regexp"
+	"encoding/json"
+	"math/bits"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -48,8 +49,11 @@ func itoa(n int) string {
 // name followed by ':' or '=' counts when its value is an object or array
 // (the text rules handle unquoted scalar values).
 //
-// The work is linear in the length of the text for each encoding level
-// followed, and the text is at most MaxRedactInput bytes.
+// Text that is not valid JSON afterwards gets a second look (recover),
+// which does not rely on the quoting being sound. The work is bounded:
+// linear for each encoding level followed, within a budget for recover,
+// and the text is at most MaxRedactInput bytes. Text recover cannot finish
+// within its budget is replaced as a whole.
 func redactMembers(src string, sensitive func(string) bool) string {
 	if !strings.ContainsAny(src, ":=") {
 		return src // nothing can be a member
@@ -57,12 +61,21 @@ func redactMembers(src string, sensitive func(string) bool) string {
 	m := &memberScanner{src: src, sensitive: sensitive}
 	m.scan(0, 0, len(src))
 	out := m.apply()
-	// Second look, for text whose quoting is broken (a stray quote shifts
-	// every later string): find sensitive names directly before an object
-	// or array value, at any encoding level, and replace those values too.
+	if json.Valid([]byte(out)) {
+		return out // well-formed: the first pass read every member exactly
+	}
+	// Second look, for text whose quoting may be broken (see recover).
 	m2 := &memberScanner{src: out, sensitive: sensitive}
-	m2.candidates()
+	if !m2.recover() {
+		return tooAmbiguous(len(src))
+	}
 	return m2.apply()
+}
+
+// tooAmbiguous stands in for text that recover could not finish checking
+// within its work budget.
+func tooAmbiguous(n int) string {
+	return Redacted + " (" + itoa(n) + " bytes of JSON-like text too ambiguous to check within the work limit)"
 }
 
 type span struct {
@@ -73,6 +86,8 @@ type span struct {
 type memberScanner struct {
 	src       string
 	sensitive func(string) bool
+	work      int // bytes recover has looked at
+	budget    int // recover's limit
 	spans     []span
 }
 
@@ -396,33 +411,189 @@ func (m *memberScanner) unquoted(level, start, end, b int) int {
 	return m.redactValue(level, v, b)
 }
 
-// candidate finds "name": { or "name": [ at any encoding level (the same
-// number of backslashes before each quote, 0, 1, 3 or 7). Names here are
-// plain; names with escapes are found by scan.
-var candidate = regexp.MustCompile(`(\\*)"([A-Za-z0-9_.\- ]{1,128})(\\*)"[ \t\r\n]*:[ \t\r\n]*[\[{]`)
+// maxRecoverName is how far back recover looks for the opening quote of a
+// member name. A name whose opening quote is further away is treated as
+// sensitive: a work limit must not hand a value to a weaker rule.
+const maxRecoverName = MaxString
 
-func (m *memberScanner) candidates() {
-	if !strings.ContainsAny(m.src, "{[") {
-		return
+// quoteLevel returns the encoding level of a double quote at offset q: the
+// number of trailing one bits in the length of the backslash run before
+// it. 0 backslashes (or an even number, escaped backslashes) is a level-0
+// quote; 1 is \" (level 1); 3 is \\\" (level 2); 5 is an escaped backslash
+// then a level-1 quote; and so on. It also returns the run's start.
+func (m *memberScanner) quoteLevel(q, floor int) (level, runStart int) {
+	r := q
+	for r > floor && m.src[r-1] == '\\' {
+		r--
 	}
-	next := 0
-	for _, loc := range candidate.FindAllStringSubmatchIndex(m.src, -1) {
-		if loc[0] < next {
-			continue
+	return bits.TrailingZeros(^uint(q - r)), r
+}
+
+// spend charges n bytes of work to recover's budget and reports whether
+// it is exhausted.
+func (m *memberScanner) spend(n int) bool {
+	m.work += n
+	return m.work > m.budget
+}
+
+// recover is a second look for text that is not valid JSON, whose quoting
+// may be broken: a stray quote shifts every string the first pass reads,
+// so a member it should have seen can go unnoticed. From every ':' recover
+// reads the quoted name before it backwards, at the encoding level its
+// closing quote shows, decodes it (escapes included) and classifies it; a
+// sensitive name has its value replaced at that level, whatever the
+// value's shape. When the opening quote is not within maxRecoverName
+// bytes, the name is treated as sensitive. From every ':' or '=' it also
+// reads an unquoted name; a sensitive one followed by an object or array
+// has that value replaced by a bare [REDACTED] (valid in text and inside a
+// JSON string), up to its matching bracket, or to the end of the text when
+// the brackets never balance.
+//
+// The work is bounded (recover's budget is a few times the length of the
+// text). It returns false when the budget runs out: the caller then
+// replaces the whole text rather than show it partly checked.
+func (m *memberScanner) recover() bool {
+	src := m.src
+	m.budget = 8*len(src) + maxRecoverName
+	bounds := map[int]int{} // level -> end of the enclosing string, cached
+	for i := 0; i < len(src); {
+		j := strings.IndexAny(src[i:], ":=")
+		if j < 0 {
+			return true
 		}
-		pre, post := loc[3]-loc[2], loc[7]-loc[6]
-		level := -1
-		for l := 0; l <= maxEncodingDepth; l++ {
-			if pre == (1<<l)-1 {
-				level = l
+		i += j
+		k := i
+		for k > 0 && isSpace(rune(src[k-1])) {
+			k--
+		}
+		if src[i] == ':' && k > 0 && src[k-1] == '"' {
+			end, ok, done := m.recoverQuoted(k-1, i, bounds)
+			if !done {
+				return false
+			}
+			if ok {
+				i = end
+				continue
 			}
 		}
-		if level < 0 || pre != post || !m.sensitive(m.src[loc[4]:loc[5]]) {
-			continue
+		start := k
+		for start > 0 && isWord(rune(src[start-1])) {
+			start--
 		}
-		v := loc[1] - 1 // the bracket
-		next = m.redactValue(level, v, len(m.src))
+		if start < k {
+			v := i + 1
+			for v < len(src) && isSpace(rune(src[v])) {
+				v++
+			}
+			if v < len(src) && (src[v] == '{' || src[v] == '[') && m.sensitive(src[start:k]) {
+				e := bracketEnd(src, v)
+				if m.spend(e - v) {
+					return false
+				}
+				if src[v:e] != Redacted {
+					m.spans = append(m.spans, span{v, e, Redacted})
+				}
+				i = e
+				continue
+			}
+		}
+		i++
 	}
+	return true
+}
+
+// recoverQuoted handles a ':' at sep whose name ends with the quote at q.
+// It returns where to go on and whether a value was replaced; done is
+// false when the work budget ran out.
+func (m *memberScanner) recoverQuoted(q, sep int, bounds map[int]int) (next int, replaced, done bool) {
+	src := m.src
+	level, runStart := m.quoteLevel(q, 0)
+	nameEnd := q - (1<<level - 1) // where the closing quote's encoding starts
+	if nameEnd < runStart {
+		nameEnd = runStart
+	}
+	// Find the opening quote of the same level, skipping deeper quotes
+	// (they are inside the name) and stopping at a shallower one (the name
+	// is not a string of this level, so this is not a member).
+	lo := max(0, nameEnd-maxRecoverName)
+	p, nameStart := nameEnd, -1
+	for {
+		o := strings.LastIndexByte(src[lo:p], '"')
+		if o < 0 {
+			break
+		}
+		o += lo
+		lv, rs := m.quoteLevel(o, lo)
+		if m.spend(p - rs) {
+			return 0, false, false
+		}
+		if lv == level {
+			nameStart = o + 1
+			break
+		}
+		if lv < level {
+			return 0, false, true
+		}
+		p = rs
+	}
+	sensitive := false
+	switch {
+	case nameStart >= 0:
+		sensitive = m.sensitive(m.text(level+1, nameStart, nameEnd))
+	case lo > 0:
+		sensitive = true // the name is longer than the window: fail closed
+	default:
+		return 0, false, true // a quote with nothing opening it: not a member
+	}
+	if !sensitive {
+		return 0, false, true
+	}
+	// The value ends at the latest where the string holding this level
+	// ends: the next quote of a shallower level.
+	end := len(src)
+	if level > 0 {
+		if b, ok := bounds[level]; ok && b > sep {
+			end = b
+		} else {
+			for x := sep + 1; x < len(src); {
+				y := strings.IndexByte(src[x:], '"')
+				if y < 0 {
+					break
+				}
+				y += x
+				if lv, _ := m.quoteLevel(y, sep); lv < level {
+					end = y
+					break
+				}
+				x = y + 1
+			}
+			if m.spend(end - sep) {
+				return 0, false, false
+			}
+			bounds[level] = end
+		}
+	}
+	v := m.skipSpace(level, sep+1, end)
+	e := m.redactValue(level, v, end)
+	return max(e, sep+1), true, true
+}
+
+// bracketEnd returns where the object or array starting at v ends, by its
+// brackets alone (quoting may be broken here), or the end of the text.
+func bracketEnd(s string, v int) int {
+	depth := 0
+	for i := v; i < len(s); i++ {
+		switch s[i] {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(s)
 }
 
 // apply returns the text with the recorded replacements.
