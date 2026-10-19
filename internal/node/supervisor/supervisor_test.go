@@ -445,7 +445,10 @@ func TestKeyStateEndsWithTheProcess(t *testing.T) {
 	sp.Ready = nil
 	r := start(t, []Spec{sp}, fast)
 	r.waitFor("a restart", func(Status) bool { return strings.Count(r.out.String(), "[keyprinter] before key\n") >= 2 })
-	r.stopClean()
+	// The component exits by itself (status 3) again and again, so the stop
+	// can meet it exiting with that status and report it as unclean. How it
+	// stops is not what this test checks; its output is.
+	_ = r.stop()
 	out := r.out.String()
 	if strings.Contains(out, bodyMarker) {
 		t.Fatalf("key material reached the output:\n%s", out)
