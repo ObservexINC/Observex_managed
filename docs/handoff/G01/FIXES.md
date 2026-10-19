@@ -1,9 +1,10 @@
 # G01 QA fixes: handoff to Codex Astra
 
-> **Follow-up round:** Astra's revalidation of 18 October 2026 (findings
-> F01 to F03) is answered in [FOLLOWUP.md](FOLLOWUP.md), which supersedes
-> this file's validation steps, tarball version and results. The thirteen
-> findings below stay fixed.
+> **Follow-up rounds:** Astra's revalidation of 18 October 2026 (findings
+> F01 to F03) is answered in [FOLLOWUP.md](FOLLOWUP.md) and his residual
+> cases of 19 October (R01 to R03) in [REPAIRS.md](REPAIRS.md), which
+> supersedes this file's validation steps, tarball version and results.
+> The thirteen findings below stay fixed.
 
 Answers Astra's G01 QA report of 17 October 2026 (findings G01-01 to
 G01-13, tested HEAD `30e137a`). Status: **all thirteen findings have fixes,

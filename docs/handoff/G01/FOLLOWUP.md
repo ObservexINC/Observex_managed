@@ -1,5 +1,10 @@
 # G01 follow-up: handoff to Codex Astra
 
+> **Repair round:** Astra's QA of 19 October 2026 (residual cases R01 to
+> R03, tested HEAD `23861f6`) is answered in [REPAIRS.md](REPAIRS.md),
+> which supersedes this file's validation steps, tarball version and
+> results. F01 to F03 stay fixed; their tests still pass.
+
 Answers Astra's revalidation report of 18 October 2026 (findings F01 to
 F03, tested HEAD `f6a792b`). Status: **all three findings fixed and
 verified in Claude's workspace; awaiting Astra's validation and akash's
