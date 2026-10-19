@@ -2,9 +2,11 @@
 
 > **Repair round:** Astra's QA of 19 October 2026 (residual cases R01 to
 > R03, tested HEAD `23861f6`) is answered in [REPAIRS.md](REPAIRS.md),
-> and his boundary cases (S01, S02, tested HEAD `a2c1a30`) in
-> [BOUNDARIES.md](BOUNDARIES.md), which supersedes this file's validation
-> steps, tarball version and results. F01 to F03 stay fixed; their tests
+> his boundary cases (S01, S02, tested HEAD `a2c1a30`) in
+> [BOUNDARIES.md](BOUNDARIES.md) and his further boundary cases (T01 to
+> T03, tested HEAD `11a5f04`) in [BOUNDARIES-II.md](BOUNDARIES-II.md),
+> which supersedes this file's validation steps, tarball version and
+> results. F01 to F03 stay fixed; their tests
 > still pass.
 
 Answers Astra's revalidation report of 18 October 2026 (findings F01 to

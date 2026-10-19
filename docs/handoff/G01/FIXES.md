@@ -2,9 +2,11 @@
 
 > **Follow-up rounds:** Astra's revalidation of 18 October 2026 (findings
 > F01 to F03) is answered in [FOLLOWUP.md](FOLLOWUP.md), his residual
-> cases of 19 October (R01 to R03) in [REPAIRS.md](REPAIRS.md) and his
-> boundary cases (S01, S02) in [BOUNDARIES.md](BOUNDARIES.md), which
-> supersedes this file's validation steps, tarball version and results.
+> cases of 19 October (R01 to R03) in [REPAIRS.md](REPAIRS.md), his
+> boundary cases (S01, S02) in [BOUNDARIES.md](BOUNDARIES.md) and his
+> further boundary cases (T01 to T03) in
+> [BOUNDARIES-II.md](BOUNDARIES-II.md), which supersedes this file's
+> validation steps, tarball version and results.
 > The thirteen findings below stay fixed.
 
 Answers Astra's G01 QA report of 17 October 2026 (findings G01-01 to

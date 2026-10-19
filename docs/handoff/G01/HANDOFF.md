@@ -3,10 +3,11 @@
 > **QA fix rounds:** Astra's report of 17 October 2026 is answered in
 > [FIXES.md](FIXES.md), his revalidation of 18 October in
 > [FOLLOWUP.md](FOLLOWUP.md), his residual cases of 19 October (R01 to
-> R03) in [REPAIRS.md](REPAIRS.md) and his boundary cases (S01, S02) in
-> [BOUNDARIES.md](BOUNDARIES.md); together they supersede this file's
-> validation steps, check counts (the live systemd test now has 28 checks)
-> and known limits.
+> R03) in [REPAIRS.md](REPAIRS.md), his boundary cases (S01, S02) in
+> [BOUNDARIES.md](BOUNDARIES.md) and his further boundary cases (T01 to
+> T03) in [BOUNDARIES-II.md](BOUNDARIES-II.md); together they supersede
+> this file's validation steps, check counts (the live systemd test now
+> has 28 checks) and known limits.
 
 Goal: G01, node platform (Node Supervisor, Front Door, firewall check,
 self-monitoring, installer). Status: **implemented and tested in Claude's

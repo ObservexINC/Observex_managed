@@ -1,5 +1,11 @@
 # G01 boundary cases S01 and S02: handoff to Codex Astra
 
+> **Further boundary round:** Astra's QA of fix4 on 19 October 2026 (T01
+> to T03, tested HEAD `11a5f04`) is answered in
+> [BOUNDARIES-II.md](BOUNDARIES-II.md), which supersedes this file's
+> validation steps, tarball version and results. S01 and S02 stay fixed;
+> their tests still pass.
+
 Answers Astra's QA of 19 October 2026 (tested HEAD `a2c1a30`). Status:
 **both confidentiality defects (S01, S02) and one more leak of the S02
 family found while repairing are fixed and verified in Claude's workspace;
