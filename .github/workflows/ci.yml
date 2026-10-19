@@ -72,6 +72,47 @@ jobs:
           sudo apt-get install -y -q shellcheck
           make shell-check
 
+  engines:
+    name: Store adapters against Cassandra and OpenSearch
+    runs-on: ubuntu-latest
+    # Plain HTTP and no authentication here: the tarball rig
+    # (test/rig/engines-tarball.sh) and Astra's compose run exercise
+    # PasswordAuthenticator, HTTPS and basic authentication.
+    services:
+      cassandra:
+        image: cassandra:5.0.9
+        env:
+          MAX_HEAP_SIZE: 1G
+          HEAP_NEWSIZE: 256M
+        ports:
+          - 9042:9042
+        options: >-
+          --health-cmd "cqlsh -e 'describe keyspaces'"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+      opensearch:
+        image: opensearchproject/opensearch:3.9.0
+        env:
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          check-latest: true
+      - name: Contract suites and adapter tests on the real engines
+        env:
+          OBSERVEX_TEST_CASSANDRA: 127.0.0.1:9042
+          OBSERVEX_TEST_OPENSEARCH: http://127.0.0.1:9200
+        run: make test-engines
+
   node-install:
     name: Node tarball install test (systemd)
     runs-on: ubuntu-latest

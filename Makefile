@@ -15,7 +15,7 @@ COVERFILE := coverage.out
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOARCH    ?= amd64
 TARBALL   := dist/observex-managed-node-$(VERSION)-linux-$(GOARCH).tar.gz
-SHELL_SCRIPTS := packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/test-install.sh scripts/package.sh scripts/secrets-scan.sh
+SHELL_SCRIPTS := packaging/linux/install.sh packaging/linux/uninstall.sh packaging/linux/test-install.sh scripts/package.sh scripts/secrets-scan.sh test/rig/engines-tarball.sh
 MODULE    := github.com/ObservexINC/Observex_managed
 
 # Check tools, pinned. "make tools" installs them through the Go module
@@ -27,7 +27,7 @@ GITLEAKS_VERSION      := v8.30.1
 GO_LICENSES_VERSION   := v1.6.0
 BUF_VERSION           := v1.74.0
 
-.PHONY: all build fmt-check vet test race cover fuzz ci-local ci tools lint vuln vuln-package secrets licenses proto-lint shell-check package install-test clean
+.PHONY: all build fmt-check vet test race cover fuzz ci-local ci tools lint vuln vuln-package secrets licenses proto-lint shell-check package install-test clean test-engines
 
 all: ci-local
 
@@ -85,6 +85,10 @@ install-test: package
 	packaging/linux/test-install.sh layout $(TARBALL)
 
 # Everything that needs only the Go toolchain.
+# The store adapters against real engines (test/rig); a missing engine fails.
+test-engines:
+	OBSERVEX_REQUIRE_ENGINES=1 $(GO) test -count=1 -race ./internal/store/...
+
 ci-local: fmt-check vet build race cover shell-check
 
 # Full CI, as run by GitHub Actions and by Astra.

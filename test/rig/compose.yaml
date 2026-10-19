@@ -1,0 +1,38 @@
+# The real engines for the store adapter tests, in Docker (ADR 0011).
+#
+#   OPENSEARCH_INITIAL_ADMIN_PASSWORD=... docker compose -f test/rig/compose.yaml up -d
+#
+# Image names are settings, so the source can be Docker Hub (the default),
+# a mirror such as Amazon ECR Public, or images loaded from tarballs:
+#   CASSANDRA_IMAGE, OPENSEARCH_IMAGE.
+# Ports are published on loopback only. OpenSearch runs its security plugin
+# with HTTPS and demo certificates; copy its CA out for the tests (see
+# README.md). Cassandra runs without authentication here; the tarball rig
+# (engines-tarball.sh) runs it with PasswordAuthenticator.
+name: observex-rig
+services:
+  cassandra:
+    image: ${CASSANDRA_IMAGE:-cassandra:5.0.9}
+    environment:
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+      CASSANDRA_CLUSTER_NAME: observex-test
+    ports:
+      - "127.0.0.1:9042:9042"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+  opensearch:
+    image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:3.9.0}
+    environment:
+      discovery.type: single-node
+      node.store.allow_mmap: "false"
+      OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_INITIAL_ADMIN_PASSWORD:?set OPENSEARCH_INITIAL_ADMIN_PASSWORD (8+ characters with upper, lower, digit and symbol)}
+      cluster.routing.allocation.disk.watermark.low: 2gb
+      cluster.routing.allocation.disk.watermark.high: 1gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 500mb
+    ports:
+      - "127.0.0.1:9200:9200"

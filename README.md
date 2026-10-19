@@ -34,6 +34,7 @@ installs from a tarball (`packaging/linux/README.md`).
 | `internal/store/tracestore` | TraceStore v0: write-ahead log, Parquet blocks, trace and service indexes (G02) |
 | `internal/store/cassandra` | MetricStore on Cassandra 5.0 (G02) |
 | `internal/store/opensearch` | SearchStore on OpenSearch 3 (G02) |
+| `test/rig` | Real Cassandra and OpenSearch for the adapter tests: Docker compose or verified tarballs |
 | `internal/store/enginetest` | Finds the real engines adapter tests run against |
 | `proto/observex` | Wire schemas: common types, intake, enrollment, health |
 | `docs/adr` | Architecture decision records (Proposed until akash accepts them) |
