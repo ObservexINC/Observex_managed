@@ -59,6 +59,24 @@ its own under `internal/store`, with a README.
 - While too many heads wait for the flusher, writers wait; if the last flush
   failed, writes are refused rather than filling memory.
 
+### MetricStore: Cassandra 5.0 (`internal/store/cassandra`)
+
+- Three tables: `metric_series` (partition: metric and one of 16 shards;
+  clustering: series key; the labels), `metric_series_days` (the UTC days a
+  series has points on) and `metric_points` (partition: series key and day;
+  clustering: time in Unix nanoseconds). Times are `bigint` nanoseconds
+  rather than Cassandra's millisecond `timestamp`, so no precision is lost.
+- Writes check every sample first, then write series, days and points as
+  unlogged single-partition batches under the batch size limit. Every
+  statement is idempotent, so a write that fails part way can be repeated;
+  the contract's all-or-nothing applies to invalid input, which writes
+  nothing.
+- Queries list a metric's series from its shards, filter them by the
+  matchers, and read only the days each series has data on.
+- GoCQL v2 with PasswordAuthenticator; the password is a `logging.Secret`.
+  The driver's warnings and errors go through the redacting handler. No TLS
+  yet (G06).
+
 ### Real engines in tests
 
 The contract suite runs against each real engine through the same test

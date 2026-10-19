@@ -32,6 +32,8 @@ installs from a tarball (`packaging/linux/README.md`).
 | `internal/store/fake` | In-memory stores that pass those suites |
 | `internal/store/etcdstore` | ConfigurationStore: an embedded etcd member and a ConfigStore over it (G02) |
 | `internal/store/tracestore` | TraceStore v0: write-ahead log, Parquet blocks, trace and service indexes (G02) |
+| `internal/store/cassandra` | MetricStore on Cassandra 5.0 (G02) |
+| `internal/store/enginetest` | Finds the real engines adapter tests run against |
 | `proto/observex` | Wire schemas: common types, intake, enrollment, health |
 | `docs/adr` | Architecture decision records (Proposed until akash accepts them) |
 | `docs/security/threat-model.md` | Threat model |
