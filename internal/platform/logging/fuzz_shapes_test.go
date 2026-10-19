@@ -19,7 +19,7 @@ import (
 func FuzzSensitiveShapes(f *testing.F) {
 	// Shapes 3 and 4 build documents over 1 MiB; one seed each keeps the
 	// seed run short.
-	for shape := uint8(0); shape < 8; shape++ {
+	for shape := uint8(0); shape < shapes; shape++ {
 		f.Add(shape, int16(1), uint8(3), uint16(5), "api_key")
 		if shape != 3 && shape != 4 {
 			f.Add(shape, int16(0), uint8(1), uint16(0), "password")
@@ -33,8 +33,9 @@ func FuzzSensitiveShapes(f *testing.F) {
 		}
 		name, _ := json.Marshal(word) // the word as a JSON string, any characters
 		d := int(depth % 6)
+		secret := m // what must not reach the output
 		var v any
-		switch shape % 8 {
+		switch shape % shapes {
 		case 0: // an explicit secret behind d unexported wrappers
 			var x any = logging.Secret(m)
 			if delta&1 != 0 {
@@ -51,9 +52,31 @@ func FuzzSensitiveShapes(f *testing.F) {
 				a []any
 				b map[string]any
 			}{[]any{1, s}, map[string]any{"k": &s, "l": []logging.Secret{s}}}
-		case 2: // a sensitive map key around the display limit
-			n := max(logging.MaxString+int(delta)%64-len(word), 0)
-			v = map[string]string{strings.Repeat("x", n) + word: m}
+		case 2: // a sensitive map key around the display limit, maybe boxed
+			// Padding keeps a word sensitive only when it holds a secret
+			// fragment; a name sensitive only as a whole ("pass", "dsn")
+			// is not sensitive once padded, so it is padded with
+			// "password" instead and tested unpadded as well. The padded
+			// key's sensitivity is checked, not assumed.
+			frag := word
+			if !logging.IsSensitiveKey("x" + word) {
+				frag = "password"
+			}
+			key := strings.Repeat("x", max(logging.MaxString+int(delta)%64-len(frag), 0)) + frag
+			if !logging.IsSensitiveKey(key) {
+				t.Fatalf("generator: the padded key (%d bytes) is not sensitive", len(key))
+			}
+			exact := word
+			switch (delta >> 1) & 3 {
+			case 0:
+				v = map[string]string{key: m, exact: m}
+			case 1:
+				v = map[any]string{key: m, exact: m}
+			case 2:
+				v = map[*string]string{&key: m, &exact: m}
+			default:
+				v = map[any]string{&key: m, exact: m}
+			}
 		case 3: // JSON around the parse limit, the member d levels deep, maybe cut
 			obj := `{` + string(name) + `:{"value":"` + m + `"}}`
 			for i := 0; i < d; i++ {
@@ -95,19 +118,47 @@ func FuzzSensitiveShapes(f *testing.F) {
 			doc := `{"a":1,` + string(name) + `:{"value":"` + m + `","n":[1,2,{"x":"` + m + `"}]}}`
 			at := strings.Index(doc, m) + int(cut)%(len(doc)-strings.Index(doc, m))
 			v = doc[:at]
+		case 8: // broken quoting before an escaped name, a structured value, 0 to 2 encodings, maybe cut
+			prefixes := []string{"", `prefix " `, `a "b" c" `, `"open `, `5": `}
+			esc := string(name)
+			if word[0] < utf8.RuneSelf && name[1] == word[0] {
+				esc = fmt.Sprintf(`"\u%04x`, word[0]) + string(name[2:])
+			}
+			values := []string{`{"value":"M"}`, `["M",{"v":"M"}]`, `"M"`, `{"a":{"b":["M"]}}`}
+			text := prefixes[d%len(prefixes)] + `{` + esc + `:` + strings.ReplaceAll(values[int(cut)%len(values)], "M", m) + `}`
+			levels := int(depth/8) % 3
+			for i := 0; i < levels; i++ {
+				q, _ := json.Marshal(text)
+				text = string(q)
+			}
+			if levels > 0 {
+				text = "body=" + text + " end"
+			}
+			if delta&1 != 0 { // cut inside the marker; what is left of it must not show
+				n := 4 + int(cut)%(len(m)-4)
+				secret = m[:n]
+				text = text[:strings.Index(text, m)+n]
+			}
+			v = text
 		}
 		out := logLine(t, v)
-		if strings.Contains(out, m) {
-			t.Fatalf("marker reached the output (shape %d): %.500s", shape%8, out)
+		if strings.Contains(out, secret) {
+			t.Fatalf("marker reached the output (shape %d): %.500s", shape%shapes, out)
 		}
 		if s, ok := v.(string); ok {
 			r := logging.RedactString(s)
+			if strings.Contains(r, secret) {
+				t.Fatalf("marker survived RedactString (shape %d): %.500s", shape%shapes, r)
+			}
 			if logging.RedactString(r) != r {
-				t.Fatalf("not idempotent (shape %d)", shape%8)
+				t.Fatalf("not idempotent (shape %d)", shape%shapes)
 			}
 		}
 	})
 }
+
+// shapes is how many shapes FuzzSensitiveShapes builds.
+const shapes = 9
 
 // notKeyRune reports characters an unquoted key in this test may not hold.
 func notKeyRune(r rune) bool {
