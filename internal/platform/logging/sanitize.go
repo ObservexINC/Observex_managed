@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,8 +57,17 @@ const (
 //     are walked field by field, so a String method cannot print a secret
 //     field. Named numbers and booleans with a String method (enumerations)
 //     use it, under recover, and the result is scrubbed.
+//   - The type decides before anything is read: a logging.Secret is
+//     Redacted wherever it is found, through pointers, interfaces,
+//     collections and unexported fields alike.
 //   - Unexported struct fields are read by reflection only; no methods are
-//     called on them.
+//     called on them. A value there whose type defines its own log form
+//     (slog.LogValuer) cannot be asked for it, so it is Redacted rather
+//     than walked.
+//   - Map keys and JSON member names are classified on their full original
+//     text, before the text rules or the length bound shorten the key that
+//     is shown. Keys that become equal when shown get a " #2", " #3" ...
+//     suffix, so no entry hides another.
 //   - Cycles become CycleMarker. Depth, item and total-size bounds apply.
 type sanitizer struct {
 	sensitive func(string) bool
@@ -134,10 +144,20 @@ func (s *sanitizer) value(rv reflect.Value, depth int) any {
 		}
 	}
 
-	if rv.CanInterface() {
-		if out, ok := s.special(rv, t, depth); ok {
-			return out
+	// Explicit secrets: the type is enough, so nothing is read and
+	// visibility does not matter (rv may be an unexported field).
+	if t == secretType {
+		return Redacted
+	}
+	if !rv.CanInterface() {
+		// Unexported data. A type with its own log form cannot be asked for
+		// it here (that needs Interface), and walking its fields would
+		// bypass it, so the value is not shown.
+		if t.Implements(logValuerType) {
+			return Redacted
 		}
+	} else if out, ok := s.special(rv, t, depth); ok {
+		return out
 	}
 
 	switch rv.Kind() {
@@ -205,8 +225,6 @@ func (s *sanitizer) value(rv reflect.Value, depth int) any {
 // only for values reachable without unexported fields (CanInterface).
 func (s *sanitizer) special(rv reflect.Value, t reflect.Type, depth int) (any, bool) {
 	switch t {
-	case secretType:
-		return Redacted, true
 	case timeType:
 		return rv.Interface().(time.Time).Format(time.RFC3339Nano), true
 	case durationType:
@@ -274,37 +292,71 @@ func (s *sanitizer) structValue(rv reflect.Value, t reflect.Type, depth int) any
 }
 
 type mapEntry struct {
-	key string
-	val reflect.Value
+	raw       string // the key as given (strings) or as rendered (other kinds)
+	key       string // the key as shown: redacted and bounded
+	sensitive bool   // decided on raw and on key, never on key alone
+	val       reflect.Value
+}
+
+// keyForms returns a map key's original text and the form shown. Plain
+// string keys are classified on their full text; a key whose type decides
+// how it is shown (logging.Secret, a slog.LogValuer) and keys of other
+// kinds are rendered by the sanitizer first.
+func (s *sanitizer) keyForms(k reflect.Value, depth int) (raw, shown string) {
+	t := k.Type()
+	if k.Kind() == reflect.String && t != secretType && !t.Implements(logValuerType) {
+		raw = k.String()
+		return raw, s.text(raw)
+	}
+	shown = fmt.Sprint(s.value(k, depth+1))
+	return shown, shown
 }
 
 func (s *sanitizer) mapValue(rv reflect.Value, depth int) any {
 	entries := make([]mapEntry, 0, rv.Len())
 	it := rv.MapRange()
 	for it.Next() {
-		k := it.Key()
-		var ks string
-		if k.Kind() == reflect.String {
-			ks = s.text(k.String())
-		} else {
-			ks = fmt.Sprint(s.value(k, depth+1))
-		}
-		entries = append(entries, mapEntry{key: ks, val: it.Value()})
+		raw, shown := s.keyForms(it.Key(), depth)
+		entries = append(entries, mapEntry{
+			raw: raw, key: shown, val: it.Value(),
+			sensitive: s.sensitive(raw) || s.sensitive(shown),
+		})
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].key < entries[j].key })
-	out := make(map[string]any, len(entries))
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].key != entries[j].key {
+			return entries[i].key < entries[j].key
+		}
+		return entries[i].raw < entries[j].raw
+	})
+	out := make(map[string]any, min(len(entries), MaxItems+1))
 	for i, e := range entries {
 		if i == MaxItems {
 			out[MoreMarker] = len(entries) - i
 			break
 		}
-		if s.sensitive(e.key) {
-			out[e.key] = Redacted
+		name := uniqueKey(out, e.key)
+		if e.sensitive {
+			out[name] = Redacted
 			continue
 		}
-		out[e.key] = s.value(e.val, depth+1)
+		out[name] = s.value(e.val, depth+1)
 	}
 	return out
+}
+
+// uniqueKey returns key, or key with " #2", " #3" ... when out already
+// has it: two keys that differ can look the same once redacted or
+// shortened, and neither may hide the other.
+func uniqueKey(out map[string]any, key string) string {
+	if _, taken := out[key]; !taken {
+		return key
+	}
+	for n := 2; ; n++ {
+		k := key + " #" + strconv.Itoa(n)
+		if _, taken := out[k]; !taken {
+			return k
+		}
+	}
 }
 
 func (s *sanitizer) list(rv reflect.Value, depth int) any {
@@ -336,11 +388,12 @@ func (s *sanitizer) slogValue(v slog.Value, depth int) any {
 				out[MoreMarker] = len(v.Group()) - i
 				break
 			}
-			if s.sensitive(a.Key) {
-				out[a.Key] = Redacted
+			name := uniqueKey(out, s.text(a.Key))
+			if s.sensitive(a.Key) || s.sensitive(name) {
+				out[name] = Redacted
 				continue
 			}
-			out[a.Key] = s.slogValue(resolve(a.Value), depth+1)
+			out[name] = s.slogValue(resolve(a.Value), depth+1)
 		}
 		return out
 	case slog.KindAny:
@@ -374,7 +427,9 @@ func (s *sanitizer) jsonValue(v any, depth int) any {
 				break
 			}
 			rk := s.text(k)
-			if s.sensitive(k) || s.sensitive(rk) {
+			sensitive := s.sensitive(k) || s.sensitive(rk) // the full name decides
+			rk = uniqueKey(out, rk)
+			if sensitive {
 				out[rk] = Redacted
 				continue
 			}
