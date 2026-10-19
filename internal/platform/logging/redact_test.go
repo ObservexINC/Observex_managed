@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -176,10 +177,22 @@ func FuzzRedactString(f *testing.F) {
 	for _, s := range seeds {
 		f.Add(s)
 	}
+	// T01 to T03: mixed quote levels, an escaped separator, an escaped
+	// value already hidden (backslashes written as @).
+	for _, s := range []string{
+		`prefix " credentials: {@"pad@":"]","value":"x"}`,
+		`"{@"password@"@u003a@"x@"}"`,
+		`"credentials: @@@"[REDACTED]@@@""`,
+	} {
+		f.Add(strings.ReplaceAll(s, "@", "\\"))
+	}
 	f.Fuzz(func(t *testing.T, s string) {
 		once := RedactString(s)
 		if twice := RedactString(once); twice != once {
 			t.Fatalf("not idempotent:\n in:    %q\n once:  %q\n twice: %q", s, once, twice)
+		}
+		if len(s) <= MaxRedactInput && json.Valid([]byte(s)) && !json.Valid([]byte(once)) {
+			t.Fatalf("valid JSON became invalid:\n in:   %q\n once: %q", s, once)
 		}
 	})
 }

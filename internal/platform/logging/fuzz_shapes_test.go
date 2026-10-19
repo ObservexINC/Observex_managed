@@ -16,7 +16,8 @@ import (
 // fields; map keys around MaxString; composite map keys around the item,
 // depth and node bounds; JSON around MaxJSONRedact, nested, escaped, cut
 // short, double-encoded or inside other text; broken quoting before values
-// whose strings hold brackets and escapes. The invented
+// whose strings hold brackets and escapes; quote spellings mixed inside one
+// value and separators written as escapes. The invented
 // marker must never reach the log line, the line must stay valid JSON, and
 // redacting a string twice must give the same result.
 func FuzzSensitiveShapes(f *testing.F) {
@@ -180,6 +181,37 @@ func FuzzSensitiveShapes(f *testing.F) {
 				text = text[:strings.Index(text, m)+n]
 			}
 			v = text
+		case 11: // quote spellings mixed inside one value, separators maybe escaped
+			names := []string{`credentials: `, `api_key=`, `"credentials":`, `@"credentials@":`, `@u0022credentials@u0022:`}
+			nm := names[int(delta>>2&0xff)%len(names)]
+			q1 := quoteSpellings[int(cut)%len(quoteSpellings)]
+			q2 := quoteSpellings[int(cut>>2)%len(quoteSpellings)]
+			pad := []string{"]", "}", "[", "{", `@"`, "@@"}[int(cut>>4)%6]
+			value := "{" + q1 + "pad" + q1 + ":" + valueQuote(q1) + pad + valueQuote(q1) + "," +
+				q2 + "value" + q2 + ":" + valueQuote(q2) + "M" + valueQuote(q2) + "}"
+			text := fix(recoveryPrefixes[d%len(recoveryPrefixes)] + nm + value)
+			if strings.HasPrefix(nm, `"`) || strings.HasPrefix(nm, `@`) {
+				text = fix(recoveryPrefixes[d%len(recoveryPrefixes)] + "{" + nm + value + "}")
+			}
+			text = strings.ReplaceAll(text, "M", m)
+			form := int(depth/8) % 4
+			switch form {
+			case 1:
+				text = jsonOf(text)
+			case 2:
+				text = jsonOf(jsonOf(text))
+			case 3:
+				text = `{"body":` + jsonOf(text) + `}`
+			}
+			if delta&1 != 0 && form != 0 { // in JSON strings, separators as escapes
+				text = strings.ReplaceAll(strings.ReplaceAll(text, `":`, `"\u003a`), `=`, `\u003d`)
+			}
+			if delta&2 != 0 { // cut inside the marker
+				n := 4 + int(cut)%(len(m)-4)
+				secret = m[:n]
+				text = text[:strings.Index(text, m)+n]
+			}
+			v = text
 		}
 		out := logLine(t, v)
 		if strings.Contains(out, secret) {
@@ -198,7 +230,7 @@ func FuzzSensitiveShapes(f *testing.F) {
 }
 
 // shapes is how many shapes FuzzSensitiveShapes builds.
-const shapes = 11
+const shapes = 12
 
 // oneEntry returns a map holding value under key.
 func oneEntry(key reflect.Value, value string) any {

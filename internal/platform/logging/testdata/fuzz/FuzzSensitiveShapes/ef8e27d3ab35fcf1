@@ -1,0 +1,6 @@
+go test fuzz v1
+byte(';')
+int16(151)
+byte('\u009e')
+uint16(58)
+string("0")

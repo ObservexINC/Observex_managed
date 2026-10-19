@@ -159,6 +159,66 @@ func (r rule) mayMatch(s, lower string) bool {
 	return false
 }
 
+// redactEscapedStrings applies the text rules to what the JSON strings in
+// text that is not JSON say: a string whose content holds an escape is
+// decoded, and when the rules change the decoded text the string is
+// written back as a JSON string. The rules read text as written, so
+// without this a secret written with escapes inside a string (a separator
+// as \u003d, say) would not be seen. One level of encoding is decoded;
+// strings are found as the quoting shows them, which in broken text may
+// not be the strings meant, so this only ever hides more.
+func redactEscapedStrings(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for p := 0; p < len(s); {
+		i := strings.IndexByte(s[p:], '"')
+		if i < 0 {
+			break
+		}
+		q := p + i
+		e := q + 1
+		for e < len(s) && s[e] != '"' {
+			if s[e] == '\\' {
+				e++
+			}
+			e++
+		}
+		if e >= len(s) {
+			break // a string that never closes is left to the other rules
+		}
+		if content := s[q+1 : e]; strings.IndexByte(content, '\\') >= 0 {
+			var text string
+			if json.Unmarshal([]byte(s[q:e+1]), &text) == nil {
+				if r := redactText(text); r != text {
+					b.WriteString(s[last:q])
+					b.WriteString(jsonString(r))
+					last = e + 1
+				}
+			}
+		}
+		p = e + 1
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// textMayMatch reports whether any text rule can match s.
+func textMayMatch(s string) bool {
+	lower := asciiLower(s)
+	for _, r := range rules {
+		if r.mayMatch(s, lower) {
+			return true
+		}
+	}
+	return false
+}
+
 func asciiLower(s string) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] >= utf8.RuneSelf {
@@ -195,7 +255,11 @@ func redactString(s string, sensitive func(string) bool) string {
 }
 
 // redactStringAt is redactString for text found inside depth levels of
-// JSON strings (see redactStrings).
+// JSON strings (see redactStrings). Valid JSON stays valid JSON: it is
+// redacted member by member and string by string, never searched as text.
+// At depth 0 a whole object or array of at most MaxJSONRedact bytes is
+// parsed and written back in canonical form (redactJSON); text inside
+// JSON strings keeps its own form.
 func redactStringAt(s string, sensitive func(string) bool, depth int) string {
 	if s == "" {
 		return s
@@ -203,14 +267,37 @@ func redactStringAt(s string, sensitive func(string) bool, depth int) string {
 	if len(s) > MaxRedactInput {
 		return tooLarge(len(s))
 	}
-	if out, ok := redactJSON(s, sensitive); ok {
-		return out
+	if depth == 0 {
+		if out, ok := redactJSON(s, sensitive); ok {
+			return out
+		}
 	}
-	t := redactText(redactMembers(s, sensitive, depth))
+	if json.Valid([]byte(s)) {
+		s = redactValidJSON(s, sensitive, depth)
+		// Redaction can bring a document under the parse limit; give it the
+		// canonical form now, so the function stays idempotent.
+		if depth == 0 {
+			if out, ok := redactJSON(s, sensitive); ok {
+				return out
+			}
+		}
+		return s
+	}
+	t := redactEscapedStrings(redactText(redactMembers(s, sensitive)))
 	// The rules can turn invalid JSON into valid JSON (rarely); give that
 	// the JSON treatment too, so the function stays idempotent.
-	if out, ok := redactJSON(t, sensitive); ok {
-		return out
+	if depth == 0 {
+		if out, ok := redactJSON(t, sensitive); ok {
+			return out
+		}
+	}
+	if json.Valid([]byte(t)) {
+		t = redactValidJSON(t, sensitive, depth)
+		if depth == 0 {
+			if out, ok := redactJSON(t, sensitive); ok {
+				return out
+			}
+		}
 	}
 	return t
 }

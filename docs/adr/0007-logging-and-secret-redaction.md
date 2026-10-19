@@ -43,34 +43,36 @@ any secret value or fragment.
     `[UNPRINTABLE]`, never a stack trace. Other `String` methods are not
     called, since one could print a secret field. A string that is a whole
     JSON object or array of at most 1 MiB is parsed and redacted member by
-    member. Any other text (larger, truncated or malformed JSON, JSON inside
-    other text, and JSON written into JSON strings, up to three levels) gets
-    a structural pass that replaces the whole value of every member with a
-    sensitive name: string, number, object or array, and to the end of its
-    text when it never closes. Names are decoded (`\u` escapes included)
-    before they are classified. The pass is linear in the text for each
-    level it follows. Text that is still not valid JSON afterwards may have
-    broken quoting (a stray quote shifts every string after it), so it gets
-    a second look that does not trust the quoting: from every `:` the
-    quoted name before it is read backwards, at the encoding level its
-    closing quote shows, decoded and classified, and a sensitive name has
-    its value replaced; a name whose opening quote is more than 64 KiB away
-    counts as sensitive. Unquoted names before `:` or `=` with an object or
-    array value are handled the same way. Where such a value ends is not
-    taken from the quoting either: a value with no quote ends where its
-    brackets close (when they match); a value holding quotes runs to the
-    end of the text that holds it (the whole text, or the JSON string it is
-    written in), unless that JSON string is valid JSON on its own. In text
-    whose quoting is broken any quote in the value may be an unescaped
-    quote of its content, and a cut can remove whatever would show that the
-    value goes on, so no reading of the rest can prove where it ends; a
-    bracket inside a string therefore never ends a value early. The second
-    look has a work budget of a few times the length of the text; text it
-    cannot finish within it is replaced as a whole. Valid JSON skips it, so
-    its output stays valid JSON; but a string in valid JSON can hold JSON
-    whose own quoting is broken, so every string whose content holds
-    quotes is decoded and redacted as text of its own, down to three levels
-    of encoding, and written back as a JSON string when it changed.
+    member. Other valid JSON (larger, or a single string, number or literal)
+    keeps its form: its members are read exactly and a sensitive member's
+    whole value becomes `"[REDACTED]"`. It is never searched as text, since
+    a text rule could cut through an escaped value and break the quoting;
+    instead every string in it that could hold something sensitive (a
+    member, a secret pattern or an escape) is decoded, redacted as text of
+    its own and written back as a JSON string, down to three levels of JSON
+    written into JSON strings (beyond that only the text rules apply). Valid
+    JSON stays valid JSON, and strings that do not change keep their bytes.
+    Text that is not valid JSON (truncated or malformed JSON, JSON inside
+    other text) is read by two passes over the same original text, and the
+    union of what they find is hidden. The first follows the quoting and
+    JSON strings (down to three levels) and decodes names (`\u` escapes
+    included). The second does not trust the quoting: from every separator,
+    `:` or `=` as written or as an escape (`\u003a`, `\u003d`), it reads the
+    name before it, quoted (with a quote as written, escaped as `\"` or
+    written as `\u0022`, at the encoding level its closing quote shows) or
+    unquoted, decodes and classifies it; a name whose opening quote is more
+    than 64 KiB away counts as sensitive. Quoted names take any value;
+    unquoted names count before an object or array (the text rules handle
+    unquoted scalars). In this text the end of a sensitive value is not
+    taken from quoting: a value with no quote in any spelling ends where
+    its brackets close (when they match); a value holding quotes runs to the
+    end of the whole text, unless the JSON string holding it is valid JSON
+    on its own. Any quote in such a value, and even the end of the JSON
+    string holding it, may come from broken quoting, and a cut can remove
+    whatever would show the value going on, so no reading of the rest can
+    prove where it ends; a bracket inside a string never ends a value
+    early. The second pass has a work budget of a few times the length of
+    the text; text it cannot finish within it is replaced as a whole.
   - **Text.** Message text, string values and error messages are scrubbed
     for credentials in URLs and DSNs, bearer and basic credentials,
     key=value secrets, PEM private keys, JSON Web Tokens, AWS access key IDs
@@ -79,6 +81,10 @@ any secret value or fragment.
     included), and a value whose closing quote never comes is redacted to
     the end of the text. A quoted value keeps its quotes
     (`"password":"[REDACTED]"`), so JSON-like text stays JSON-like.
+    The rules read text as written; in valid JSON they read its decoded
+    strings instead (above), and in other text they also read the decoded
+    content of its JSON strings that hold escapes (one level), so a secret
+    written with escapes in a string (`password\u003d...`) is still found.
 - Work limits fail closed: text longer than 8 MiB (`MaxRedactInput`) is not
   examined but replaced as a whole by `[REDACTED]` and its length. Reaching
   a limit never lowers the protection.
