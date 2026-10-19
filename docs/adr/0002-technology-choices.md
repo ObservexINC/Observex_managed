@@ -31,13 +31,15 @@ document are still akash's to set.
 
 ## Language level and the development workspace
 
-`go.mod` declares language level 1.24, not 1.27. Claude's development workspace
-has Go 1.24.7 and cannot reach proxy.golang.org or sum.golang.org (the network
-policy refuses them), so it cannot download the 1.27 toolchain or any module.
-CI builds and tests with both 1.27 and 1.24. The `go` line moves to 1.27 when
-the workspace can reach the module proxy, or when the first 1.25+ feature is
-needed, whichever comes first. The module proxy and checksum database are never
-bypassed to work around this.
+At G00 `go.mod` declared language level 1.24, not 1.27: Claude's development
+workspace had Go 1.24.7 and could not reach proxy.golang.org or sum.golang.org,
+so it could not download the 1.27 toolchain or any module, and CI built and
+tested with both 1.27 and 1.24. The `go` line was to move to 1.27 when the
+workspace could reach the module proxy, or when the first 1.25+ feature was
+needed, whichever came first. Both happened by G02: the workspace reaches the
+proxy (with checksum verification) and runs Go 1.27.2, and etcd 3.7 and
+opensearch-go 4.8 need Go 1.26 or later. Since G02, `go.mod` declares 1.27 and
+CI tests 1.27 only. The module proxy and checksum database are never bypassed.
 
 ## Consequences
 

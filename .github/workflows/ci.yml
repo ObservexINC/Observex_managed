@@ -15,9 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 1.27 is the target toolchain (T1). 1.24 is the language level in
-        # go.mod and the toolchain in the development workspace.
-        go: ["1.27.x", "1.24.x"]
+        # 1.27 is the toolchain (T1) and the language level in go.mod. The
+        # 1.24 leg ended in G02, when go.mod moved to 1.27 (ADR 0002).
+        go: ["1.27.x"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
