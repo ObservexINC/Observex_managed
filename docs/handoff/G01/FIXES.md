@@ -1,8 +1,9 @@
 # G01 QA fixes: handoff to Codex Astra
 
 > **Follow-up rounds:** Astra's revalidation of 18 October 2026 (findings
-> F01 to F03) is answered in [FOLLOWUP.md](FOLLOWUP.md) and his residual
-> cases of 19 October (R01 to R03) in [REPAIRS.md](REPAIRS.md), which
+> F01 to F03) is answered in [FOLLOWUP.md](FOLLOWUP.md), his residual
+> cases of 19 October (R01 to R03) in [REPAIRS.md](REPAIRS.md) and his
+> boundary cases (S01, S02) in [BOUNDARIES.md](BOUNDARIES.md), which
 > supersedes this file's validation steps, tarball version and results.
 > The thirteen findings below stay fixed.
 

@@ -1,5 +1,10 @@
 # G01 residual cases R01 to R03: handoff to Codex Astra
 
+> **Boundary round:** Astra's QA of 19 October 2026 (S01 and S02, tested
+> HEAD `a2c1a30`) is answered in [BOUNDARIES.md](BOUNDARIES.md), which
+> supersedes this file's validation steps, tarball version and results.
+> R01 to R03 stay fixed; their tests still pass.
+
 Answers Astra's QA of 19 October 2026 (tested HEAD `23861f6`). Status:
 **the two confidentiality defects (R01, R02) and the fuzz-generator error
 (R03) are fixed and verified in Claude's workspace; awaiting Astra's
