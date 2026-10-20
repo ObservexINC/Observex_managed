@@ -80,7 +80,23 @@ any secret value or fragment.
     are matched escape-aware (`\"` does not end a value, double-encoded JSON
     included), and a value whose closing quote never comes is redacted to
     the end of the text. A quoted value keeps its quotes
-    (`"password":"[REDACTED]"`), so JSON-like text stays JSON-like.
+    (`"password":"[REDACTED]"`), so JSON-like text stays JSON-like; since
+    the G01 CI repair that holds for key=value text too (`password="[REDACTED]"`, an
+    unclosed value keeping its opening quote, and an unquoted value its
+    trailing backslashes, which escape what follows), so the quotes around
+    a replaced value pair up as before and a second pass reads the text the
+    same way. A bare `[REDACTED]` that a rule wrote for an unquoted name's
+    scalar value is left as it is by the structural pass, which would
+    otherwise read it as an array.
+- Redaction is repeated until the text redacts to itself, so applying it
+  twice always gives the result of applying it once: a pass only hides
+  text, but a marker can change how the next pass reads the text around
+  it. Text without secrets takes one pass, text with secrets usually two
+  (the second confirms); text still changing after four passes is replaced
+  as a whole (fail closed). The rules themselves keep the quote structure
+  (above), so in every case known the second pass changes nothing. A text
+  that redaction makes longer than 8 MiB (markers can be longer than what
+  they replace) is replaced as a whole, as such a text given directly is.
     The rules read text as written; in valid JSON they read its decoded
     strings instead (above), and in other text they also read the decoded
     content of its JSON strings that hold escapes (one level), so a secret
@@ -105,8 +121,9 @@ any secret value or fragment.
   random short strings rarely reach (secret types behind pointers,
   interfaces and unexported fields, keys around 64 KiB, JSON around 1 MiB,
   nested, escaped, cut short or double-encoded) and fails if a marker
-  survives; `FuzzPairsMatchExpression` checks that the key=value scan gives
-  exactly what the single regular expression it replaced gave;
+  survives; `FuzzPairsMatchExpression` checks that the key=value scan finds
+  exactly the pairs and values the single regular expression it replaced
+  found (the marker it writes is tested on its own, `TestPairMarker`);
   `FuzzPrefixWriter` cuts PEM keys into arbitrary writes and fails if key
   material reaches the output.
 - The invented secrets live in one file,

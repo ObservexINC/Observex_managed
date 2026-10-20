@@ -7,6 +7,7 @@
 GO        ?= go
 PKGS      := ./...
 FUZZTIME  ?= 30s
+FUZZMINIMIZETIME ?= 1s
 COVERFILE := coverage.out
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOARCH    ?= amd64
@@ -46,21 +47,22 @@ cover:
 	$(GO) test -count=1 -covermode=atomic -coverpkg=$(PKGS) -coverprofile=$(COVERFILE) $(PKGS)
 	$(GO) tool cover -func=$(COVERFILE) | tail -n 1
 
-# Each fuzz target runs for FUZZTIME. Go runs one fuzz target per invocation.
+# Each fuzz target runs for FUZZTIME. Bound failure minimization separately
+# so a failing input is saved promptly. Go runs one target per invocation.
 fuzz:
-	$(GO) test -run='^$$' -fuzz='^FuzzRedactString$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
-	$(GO) test -run='^$$' -fuzz='^FuzzRedactConfidential$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
-	$(GO) test -run='^$$' -fuzz='^FuzzSensitiveShapes$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
-	$(GO) test -run='^$$' -fuzz='^FuzzPairsMatchExpression$$' -fuzztime=$(FUZZTIME) ./internal/platform/logging
-	$(GO) test -run='^$$' -fuzz='^FuzzDecode$$' -fuzztime=$(FUZZTIME) ./internal/platform/config
-	$(GO) test -run='^$$' -fuzz='^FuzzVerifyToken$$' -fuzztime=$(FUZZTIME) ./internal/platform/tlsx
-	$(GO) test -run='^$$' -fuzz='^FuzzParseTraceID$$' -fuzztime=$(FUZZTIME) ./internal/store
-	$(GO) test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=$(FUZZTIME) ./internal/node
-	$(GO) test -run='^$$' -fuzz='^FuzzParseFeatures$$' -fuzztime=$(FUZZTIME) ./internal/node/frontdoor
-	$(GO) test -run='^$$' -fuzz='^FuzzCheck$$' -fuzztime=$(FUZZTIME) ./internal/node/firewall
-	$(GO) test -run='^$$' -fuzz='^FuzzParseStat$$' -fuzztime=$(FUZZTIME) ./internal/node/selfmon
-	$(GO) test -run='^$$' -fuzz='^FuzzWriteText$$' -fuzztime=$(FUZZTIME) ./internal/node/selfmon
-	$(GO) test -run='^$$' -fuzz='^FuzzPrefixWriter$$' -fuzztime=$(FUZZTIME) ./internal/node/supervisor
+	$(GO) test -run='^$$' -fuzz='^FuzzRedactString$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzRedactConfidential$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzSensitiveShapes$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzPairsMatchExpression$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/logging
+	$(GO) test -run='^$$' -fuzz='^FuzzDecode$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/config
+	$(GO) test -run='^$$' -fuzz='^FuzzVerifyToken$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/platform/tlsx
+	$(GO) test -run='^$$' -fuzz='^FuzzParseTraceID$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/store
+	$(GO) test -run='^$$' -fuzz='^FuzzParse$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node
+	$(GO) test -run='^$$' -fuzz='^FuzzParseFeatures$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/frontdoor
+	$(GO) test -run='^$$' -fuzz='^FuzzCheck$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/firewall
+	$(GO) test -run='^$$' -fuzz='^FuzzParseStat$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/selfmon
+	$(GO) test -run='^$$' -fuzz='^FuzzWriteText$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/selfmon
+	$(GO) test -run='^$$' -fuzz='^FuzzPrefixWriter$$' -fuzztime=$(FUZZTIME) -fuzzminimizetime=$(FUZZMINIMIZETIME) ./internal/node/supervisor
 
 # Shell scripts: syntax check everywhere; shellcheck where installed (CI).
 shell-check:

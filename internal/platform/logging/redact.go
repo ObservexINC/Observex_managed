@@ -250,8 +250,36 @@ func RedactString(s string) string {
 	return redactString(s, IsSensitiveKey)
 }
 
+// maxPasses bounds how often redaction is repeated to reach a text that
+// redacts to itself.
+const maxPasses = 4
+
+// redactString redacts s until the result redacts to itself. Each pass only
+// hides text, but a marker can change how the next pass reads the text
+// around it (the quotes and escapes near a replaced value), so a second
+// pass may hide more; repeating until nothing changes makes redaction
+// idempotent by construction. Text without secrets takes one pass, text
+// with secrets usually two (the second confirms). Text still changing after
+// maxPasses passes is replaced as a whole: fail closed.
 func redactString(s string, sensitive func(string) bool) string {
-	return redactStringAt(s, sensitive, 0)
+	return settle(s, func(t string) string { return redactStringAt(t, sensitive, 0) })
+}
+
+// settle applies pass until the text no longer changes, at most maxPasses
+// times; text still changing then is replaced as a whole.
+func settle(s string, pass func(string) string) string {
+	cur := pass(s)
+	if cur == s {
+		return cur // nothing to hide: one pass
+	}
+	for n := 1; n < maxPasses; n++ {
+		next := pass(cur)
+		if next == cur {
+			return cur
+		}
+		cur = next
+	}
+	return tooAmbiguous(len(s))
 }
 
 // redactStringAt is redactString for text found inside depth levels of
@@ -334,7 +362,34 @@ var (
 	}
 	// (?i) as in the expression: it matters only for [REDACTED] itself.
 	pairValue = regexp.MustCompile(`(?i)^(?:\[REDACTED\]|` + doubleQuoted + `|` + dquoted + `|` + squoted + `|` + unquoted + `)`)
+	// The same forms, closed by their quote.
+	dquotedClosed      = regexp.MustCompile(`^"(?:[^"\\]|\\[\s\S])*"$`)
+	doubleQuotedClosed = regexp.MustCompile(`^\\"(?:\\\\(?:\\[\s\S]|[^\\])|\\[^"\\]|[^\\])*\\"$`)
 )
+
+// pairMarker is what replaces a pair's value. A value in double quotes, as
+// written or escaped, keeps its quotes (an unclosed one keeps its opening
+// quote), so the quotes around it pair up as they did before: dropping
+// them can join two strings into one whose text reads as a sensitive name,
+// and a second pass would then hide more (FuzzRedactString found this in
+// G02). Other values become a bare marker.
+func pairMarker(value string) string {
+	switch {
+	case strings.HasPrefix(value, `\"`):
+		if doubleQuotedClosed.MatchString(value) {
+			return `\"` + Redacted + `\"`
+		}
+		return `\"` + Redacted
+	case strings.HasPrefix(value, `"`):
+		if dquotedClosed.MatchString(value) {
+			return `"` + Redacted + `"`
+		}
+		return `"` + Redacted
+	}
+	// An unquoted value can end in backslashes that escape the quote after
+	// it; they stay, so that quote stays escaped.
+	return Redacted + value[len(strings.TrimRight(value, `\`)):]
+}
 
 // foldEq reports whether r matches the ASCII character c under (?i):
 // simple case folding, so the Kelvin sign matches k and the long s
@@ -387,8 +442,9 @@ func boundaryAt(s string, i int) bool {
 }
 
 // redactPairs replaces the value of every key=value pair whose key ends in
-// a secret word. A value that is already a quoted [REDACTED] is kept, so
-// redacting stays idempotent and JSON-like text keeps its quotes.
+// a secret word, keeping a double-quoted value's quotes (pairMarker). A
+// value that is already a quoted [REDACTED] is kept, so redacting stays
+// idempotent and JSON-like text keeps its quotes.
 func redactPairs(s string) string {
 	var b strings.Builder
 	last := 0
@@ -437,7 +493,7 @@ func redactPairs(s string) string {
 			continue
 		}
 		b.WriteString(s[last:sepEnd])
-		b.WriteString(Redacted)
+		b.WriteString(pairMarker(s[sepEnd:valEnd]))
 		last = valEnd
 		i = valEnd - 1
 	}
