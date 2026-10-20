@@ -31,6 +31,14 @@ jobs:
         run: make ci-local
       - name: Fuzz (time-boxed)
         run: make fuzz FUZZTIME=30s
+      - name: Preserve failing fuzz inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-go-${{ matrix.go }}
+          path: internal/**/testdata/fuzz/**
+          if-no-files-found: ignore
+          retention-days: 14
 
   checks:
     name: Lint, vulnerabilities, secrets, licences, schemas

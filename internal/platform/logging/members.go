@@ -578,7 +578,16 @@ func (m *memberScanner) unquoted(level, start, end, a, b int) int {
 	if !ok {
 		return end
 	}
-	if c, _, _, ok := m.char(level, v, b); !ok || (c != '{' && c != '[') || !m.sensitive(m.text(level, start, end)) {
+	c, _, _, ok := m.char(level, v, b)
+	if !ok || (c != '{' && c != '[') || !m.sensitive(m.text(level, start, end)) {
+		return end
+	}
+	// A bare marker reads as an array, but here it is what a text rule wrote
+	// for a scalar value (key: 0 becomes key: [REDACTED]). Scalar values of
+	// unquoted names are the text rules' to end, so the marker stays as it
+	// is; read as an array, it could be stretched to the end of the text by
+	// a second pass, and redaction would not be idempotent.
+	if c == '[' && m.text(level, v, m.valueEnd(level, v, b)) == Redacted {
 		return end
 	}
 	return m.memberValue(level, v, a, b)
