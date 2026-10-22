@@ -59,7 +59,8 @@ bytes, flushes and flush errors, bytes cut at recovery, blocks, spans in
 blocks and in memory, frozen heads, last flush duration).
 
 Tests: `go test -race ./internal/store/tracestore` runs the contract suite
-nine ways (both formats; head, blocks, and reopened after every write),
+six ways (both formats; in the head, flushed to blocks after every write,
+and reopened after every write),
 comparisons with the fake across rewrites, flushes and reopening, recovery
 tests (torn tail cut at every length, damaged records, unfinished blocks, a
 block and its log both present, damaged indexes), and the crash test: a
