@@ -5,6 +5,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -117,6 +119,13 @@ func TestParseStat(t *testing.T) {
 		{"x (bad pid) S 0 1 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
 		{"1 (short) S 0 1", false},
 		{"1 (nan) S 0 x 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
+		// The kernel writes these numbers without a sign; FuzzParseStat found
+		// "+0" read as process 0 (input 2cfbf0d5ce660a06).
+		{"+1 (signed pid) S 0 1 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
+		{"-0 (signed pid) S 0 0 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
+		{"1 (signed pgrp) S 0 +1 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
+		{"1 (signed threads) S 0 1 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 +2 0 1 100 50", false},
+		{"99999999999 (huge pid) S 0 1 1 0 -1 0 0 0 0 0 7 3 0 0 20 0 2 0 1 100 50", false},
 	}
 	for _, tc := range cases {
 		ps, ok := parseStat(tc.line)
@@ -129,6 +138,32 @@ func TestParseStat(t *testing.T) {
 	}
 	if ps, _ := parseStat(cases[0].line); ps.utime != 7 || ps.stime != 3 || ps.threads != 2 || ps.rssPages != 50 {
 		t.Fatalf("fields = %+v", ps)
+	}
+}
+
+// TestProcessesIgnoreSignedNames checks that only directories named by
+// digits are read as processes: "+4100" is not process 4100.
+func TestProcessesIgnoreSignedNames(t *testing.T) {
+	root := t.TempDir()
+	stat := "4100 (nginx) S 1 4100 4100 0 -1 0 0 0 0 0 10 5 0 0 20 0 1 0 1 100 7"
+	for _, name := range []string{"4100", "+4100", "-4100"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name, "stat"), []byte(stat), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := &Registry{}
+	r.Register(Processes{Root: root, PageSize: 4096, PIDs: func() map[string]int { return map[string]int{"front-door": 4100} }})
+	got := text(t, r)
+	for _, want := range []string{
+		`observex_node_component_processes{component="front-door"} 1`,
+		`observex_selfmon_errors{source="processes"} 0`,
+	} {
+		if !strings.Contains(got, want+"\n") {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 
