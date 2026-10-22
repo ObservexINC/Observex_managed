@@ -4,6 +4,11 @@ The TraceStore (technology row T7, ADR 0004, ADR 0011): node-local span
 storage written in our own Go code. It keeps one copy on one node (IMP-2):
 it survives a crash of the process, not the loss of the disk.
 
+Only one store may open a data directory at a time. An operating-system
+lock is acquired before recovery and held until all store files are closed.
+The lock is released automatically when the process dies; the `LOCK` file
+stays in the directory and must not be removed while a store is running.
+
 ## What it does
 
 ```text
@@ -81,6 +86,11 @@ write in flight whole or not at all, and nothing else. Fuzz targets:
 
 Directories are created owner-only (0700), files 0600: spans can hold
 personal data.
+
+Head age is checked no more frequently than once per millisecond, including
+when a smaller positive `MaxHeadAge` is configured. `Flush` returns an error
+if a new WAL segment cannot be created; acknowledged writes remain in the
+existing WAL and the caller can retry after the underlying failure is fixed.
 
 ## Format comparison (Claude's workspace)
 

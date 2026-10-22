@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -36,7 +37,8 @@ type Options struct {
 	// spans, MaxHeadBytes of encoded spans, or is MaxHeadAge old.
 	MaxHeadSpans int
 	MaxHeadBytes int64
-	MaxHeadAge   time.Duration
+	// MaxHeadAge is checked at a minimum interval of one millisecond.
+	MaxHeadAge time.Duration
 	// GroupSpans is the number of spans per Parquet row group or segment
 	// group.
 	GroupSpans int
@@ -128,6 +130,7 @@ type Store struct {
 	opts     Options
 	format   blockFormat
 	log      *slog.Logger
+	lock     io.Closer
 
 	// writeMu serializes writers: sequence numbers, log appends and head
 	// rotation.
@@ -164,7 +167,8 @@ var _ store.TraceStore = (*Store)(nil)
 
 // Open opens or creates a store in dir and recovers it: unfinished blocks are
 // removed, blocks are opened and checked, and log records not yet in a block
-// are replayed into the head.
+// are replayed into the head. Only one store may own a directory at a time;
+// the operating system releases its lock after Close or a process crash.
 func Open(dir string, opts Options) (*Store, error) {
 	opts.defaults()
 	format, err := formatByName(opts.Format)
@@ -176,8 +180,18 @@ func Open(dir string, opts Options) (*Store, error) {
 		opts: opts, format: format, log: opts.Logger,
 		flushReq: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}),
 	}
-	for _, d := range []string{dir, s.walDir, s.blockDir} {
+	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // G703: operator-selected store directory
+		return nil, fmt.Errorf("tracestore: %w", err)
+	}
+	// Lock before recovery can truncate or remove anything. Keep the lock
+	// file in place: unlinking it would let another opener lock a new inode.
+	s.lock, err = lockDirectory(filepath.Join(dir, "LOCK"))
+	if err != nil {
+		return nil, fmt.Errorf("tracestore: lock directory: %w", err)
+	}
+	for _, d := range []string{s.walDir, s.blockDir} {
 		if err := os.MkdirAll(d, 0o700); err != nil { //nolint:gosec // G703: the store's directory, chosen by the operator
+			_ = s.closeFiles()
 			return nil, fmt.Errorf("tracestore: %w", err)
 		}
 	}
@@ -368,20 +382,20 @@ func (s *Store) WriteSpans(ctx context.Context, spans []store.Span) error {
 	full := s.active.spans >= s.opts.MaxHeadSpans || s.active.bytes >= s.opts.MaxHeadBytes
 	s.mu.Unlock()
 	if full {
-		s.rotate()
+		_ = s.rotate() // the acknowledged batch is durable in the existing WAL
 	}
 	return nil
 }
 
 // rotate freezes the active head and starts a new one with a new log
 // segment. The caller holds writeMu.
-func (s *Store) rotate() {
+func (s *Store) rotate() error {
 	w, err := createSegment(s.walDir, s.nextSeg)
 	if err != nil {
 		// The head grows until a segment can be created; writes still go to
 		// the old segment, so nothing is lost.
 		s.log.Error("tracestore: cannot start a new log segment", slog.String("error", err.Error()))
-		return
+		return fmt.Errorf("tracestore: start a new log segment: %w", err)
 	}
 	s.nextSeg++
 	old := s.wal
@@ -402,13 +416,14 @@ func (s *Store) rotate() {
 	case s.flushReq <- struct{}{}:
 	default:
 	}
+	return nil
 }
 
 // flusher writes frozen heads as blocks, and freezes the active head when it
 // is too old.
 func (s *Store) flusher() {
 	defer close(s.done)
-	tick := time.NewTicker(s.opts.MaxHeadAge / 4)
+	tick := time.NewTicker(max(s.opts.MaxHeadAge/4, time.Millisecond))
 	defer tick.Stop()
 	for {
 		select {
@@ -425,7 +440,7 @@ func (s *Store) flusher() {
 			old := !s.closed && s.active.spans > 0 && time.Since(s.active.created) >= s.opts.MaxHeadAge
 			s.mu.RUnlock()
 			if old {
-				s.rotate()
+				_ = s.rotate() // already logged; retry at the next tick
 			}
 			s.writeMu.Unlock()
 		}
@@ -490,7 +505,7 @@ func (s *Store) Flush(ctx context.Context) error {
 	err := s.closedErr(ctx)
 	s.mu.RUnlock()
 	if err == nil {
-		s.rotate()
+		err = s.rotate()
 	}
 	s.writeMu.Unlock()
 	if err != nil {
@@ -746,6 +761,9 @@ func (s *Store) closeFiles() error {
 	}
 	for _, b := range s.blocks {
 		errs = append(errs, b.close())
+	}
+	if s.lock != nil {
+		errs = append(errs, s.lock.Close())
 	}
 	return errors.Join(errs...)
 }
