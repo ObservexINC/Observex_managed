@@ -267,7 +267,10 @@ func (m *MetricStore) WriteSamples(ctx context.Context, samples []store.Sample) 
 	})
 	if err == nil {
 		err = m.parallel(ctx, len(newDays), func(ctx context.Context, i int) error {
-			key, day, _ := strings.Cut(newDays[i], "\x00")
+			// The canonical series key may itself contain NUL label values.
+			// The final separator precedes the numeric day and is unambiguous.
+			sep := strings.LastIndexByte(newDays[i], 0)
+			key, day := newDays[i][:sep], newDays[i][sep+1:]
 			d, err := strconv.Atoi(day)
 			if err != nil {
 				return err
@@ -413,10 +416,13 @@ func (m *MetricStore) QuerySeries(ctx context.Context, q store.MetricQuery) ([]s
 
 func (m *MetricStore) query(ctx context.Context, q store.MetricQuery) ([]store.SeriesPoints, error) {
 	start, end := q.Range.Start, q.Range.End
-	if !storable(start) {
+	if !end.After(minTime) || start.After(maxTime) {
+		return []store.SeriesPoints{}, nil
+	}
+	if start.Before(minTime) {
 		start = minTime
 	}
-	if !storable(end) {
+	if end.After(maxTime) {
 		end = maxTime
 	}
 	t0, t1 := start.UnixNano(), end.UnixNano()
