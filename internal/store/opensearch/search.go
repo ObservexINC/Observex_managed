@@ -8,8 +8,8 @@
 //	time     date_nanos  nanosecond time
 //	body_lc  wildcard    the body lowercased, in overlapping chunks, for the
 //	                     contract's substring search
-//	pairs    keyword     a SHA-256 of each field's name and value, for exact
-//	                     filters
+//	pairs    keyword     a SHA-256 of each field's name and value, for filter
+//	                     candidates checked against the original fields
 //	doc      not indexed the body and fields as given, returned by searches
 //
 // The OpenSearch _id is a SHA-256 of the document ID, so any ID can be used
@@ -542,7 +542,9 @@ func (s *SearchStore) search(ctx context.Context, q store.SearchQuery, limit int
 		}
 		filters = append(filters, map[string]any{"wildcard": map[string]any{"body_lc": map[string]any{"value": "*" + wildcardEscape.Replace(probe) + "*"}}})
 	}
-	var after []any
+	// Keep cursor values opaque. A date_nanos integer exceeds float64's
+	// exact range; rounding it can skip or repeat hits on the next page.
+	var after []json.RawMessage
 	for len(out) < limit {
 		size := limit - len(out)
 		if size < searchPage && len(terms) > 0 {
@@ -560,8 +562,8 @@ func (s *SearchStore) search(ctx context.Context, q store.SearchQuery, limit int
 		var resp struct {
 			Hits struct {
 				Hits []struct {
-					Source source `json:"_source"`
-					Sort   []any  `json:"sort"`
+					Source source            `json:"_source"`
+					Sort   []json.RawMessage `json:"sort"`
 				} `json:"hits"`
 			} `json:"hits"`
 		}
@@ -574,7 +576,7 @@ func (s *SearchStore) search(ctx context.Context, q store.SearchQuery, limit int
 			if err != nil {
 				return nil, err
 			}
-			if !hasTerms(d.Body, terms) {
+			if !hasTerms(d.Body, terms) || !hasFields(d.Fields, q.Filters) {
 				continue
 			}
 			out = append(out, d)
@@ -588,6 +590,17 @@ func (s *SearchStore) search(ctx context.Context, q store.SearchQuery, limit int
 		after = hits[len(hits)-1].Sort
 	}
 	return out, nil
+}
+
+// The hash narrows candidates; only the original fields establish an exact
+// match. In particular, NUL in a name or value can cross the hash's separator.
+func hasFields(fields, want map[string]string) bool {
+	for k, v := range want {
+		if got, ok := fields[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
 }
 
 func toDoc(src source) (store.Document, error) {

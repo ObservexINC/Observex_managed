@@ -29,8 +29,13 @@ and content work and re-indexing an ID replaces the document.
   patterns), and every hit is checked against the whole body before it is
   returned, paging on with `search_after` when hits fail the check.
   Lowercasing is Go's on both sides, so results equal the fake's.
-- **Filters** are exact: a term query on the hash of the name and value.
-- **Order**: newest first, ties by ID ascending, at most the limit.
+- **Filters** are exact: a term query on the hash narrows candidates, then
+  every hit is checked against its original field names and values. This
+  also handles names and values containing NUL without changing existing
+  index data. Rejected candidates do not consume the result limit.
+- **Order**: newest first, ties by ID ascending, at most the limit. Paging
+  preserves the engine's raw sort values, including integer nanoseconds,
+  without converting them to floating-point numbers.
 - **Index** checks every document first, sends bulk requests of up to 8 MiB
   and returns once the documents are searchable (`refresh=wait_for`). A call
   that fails part way returns the error; repeating it converges.
