@@ -8,10 +8,14 @@ on:
 permissions:
   contents: read
 
+# Every job runs on Ubuntu 24.04, not ubuntu-latest, so NGINX, OpenSSL and
+# ShellCheck stay at known versions; moving to a newer image is a decision of
+# its own (akash, 22 October 2026). The actions are the major versions that
+# run on Node.js 24 (GitHub removed Node.js 20 on 23 September 2026).
 jobs:
   go:
     name: Go build and tests (Go ${{ matrix.go }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -19,8 +23,8 @@ jobs:
         # 1.24 leg ended in G02, when go.mod moved to 1.27 (ADR 0002).
         go: ["1.27.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -33,7 +37,7 @@ jobs:
         run: make fuzz FUZZTIME=30s
       - name: Preserve failing fuzz inputs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus-go-${{ matrix.go }}
           path: internal/**/testdata/fuzz/**
@@ -42,12 +46,12 @@ jobs:
 
   checks:
     name: Lint, vulnerabilities, secrets, licences, schemas
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.x"
           check-latest: true
@@ -74,7 +78,7 @@ jobs:
 
   engines:
     name: Store adapters against Cassandra and OpenSearch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Plain HTTP and no authentication here: the tarball rig
     # (test/rig/engines-tarball.sh) and Astra's compose run exercise
     # PasswordAuthenticator, HTTPS and basic authentication.
@@ -102,8 +106,8 @@ jobs:
           --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
           --health-interval 10s --health-timeout 10s --health-retries 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.x"
           check-latest: true
@@ -115,12 +119,12 @@ jobs:
 
   node-install:
     name: Node tarball install test (systemd)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.x"
           check-latest: true
