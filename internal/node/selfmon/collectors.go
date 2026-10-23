@@ -81,6 +81,14 @@ type procStat struct {
 	rssPages           int64
 }
 
+// procNumber parses a number the kernel writes in /proc without a sign: a
+// process ID, a process group or a thread count. Only decimal digits are
+// accepted; strconv.Atoi would also take "+1" and "-0".
+func procNumber(s string) (int, error) {
+	n, err := strconv.ParseUint(s, 10, 31)
+	return int(n), err
+}
+
 // parseStat reads one /proc/<pid>/stat line. The command name is in
 // parentheses and may contain spaces or parentheses, so fields are counted
 // from the last ')'.
@@ -90,7 +98,7 @@ func parseStat(line string) (procStat, bool) {
 	if open < 1 || end < open {
 		return procStat{}, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(line[:open]))
+	pid, err := procNumber(strings.TrimSpace(line[:open]))
 	if err != nil {
 		return procStat{}, false
 	}
@@ -102,10 +110,10 @@ func parseStat(line string) (procStat, bool) {
 	var ps procStat
 	ps.pid = pid
 	var e [5]error
-	ps.pgrp, e[0] = strconv.Atoi(f[5-3])
+	ps.pgrp, e[0] = procNumber(f[5-3])
 	ps.utime, e[1] = strconv.ParseUint(f[14-3], 10, 64)
 	ps.stime, e[2] = strconv.ParseUint(f[15-3], 10, 64)
-	ps.threads, e[3] = strconv.Atoi(f[20-3])
+	ps.threads, e[3] = procNumber(f[20-3])
 	ps.rssPages, e[4] = strconv.ParseInt(f[24-3], 10, 64)
 	for _, err := range e {
 		if err != nil {
@@ -136,7 +144,7 @@ func (p Processes) Collect(b *Batch) {
 	}
 	groups := map[int][]procStat{}
 	for _, e := range entries {
-		if _, err := strconv.Atoi(e.Name()); err != nil {
+		if _, err := procNumber(e.Name()); err != nil {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(root, e.Name(), "stat")) // #nosec G304 -- /proc/<pid>/stat; the name is all digits (checked above)

@@ -30,19 +30,26 @@ installs from a tarball (`packaging/linux/README.md`).
 | `internal/store` | The six store interfaces (ADR 0004) |
 | `internal/store/storetest` | Contract test suites every store adapter must pass |
 | `internal/store/fake` | In-memory stores that pass those suites |
+| `internal/store/etcdstore` | ConfigurationStore: an embedded etcd member and a ConfigStore over it (G02) |
+| `internal/store/tracestore` | TraceStore v0: write-ahead log, Parquet blocks, trace and service indexes (G02) |
+| `internal/store/cassandra` | MetricStore on Cassandra 5.0 (G02) |
+| `internal/store/opensearch` | SearchStore on OpenSearch 3 (G02) |
+| `test/rig` | Real Cassandra and OpenSearch for the adapter tests: Docker compose or verified tarballs |
+| `internal/store/enginetest` | Finds the real engines adapter tests run against |
 | `proto/observex` | Wire schemas: common types, intake, enrollment, health |
 | `docs/adr` | Architecture decision records (Proposed until akash accepts them) |
 | `docs/security/threat-model.md` | Threat model |
 | `docs/governance/drafts` | Drafts for akash's approval log; nothing there is approved |
 | `docs/handoff` | Each goal's handoff to Astra |
 
-The Server, Gateway, Agent and stores come next (G02 to G05), each module
-tested on its own before integration (G06).
+The stores are being built in G02; the Server, Gateway and Agent come next
+(G03 to G05), each module tested on its own before integration (G06).
 
 ## Build and test
 
-Requires Go 1.24 or later; releases use Go 1.27. The code uses only the
-standard library, so nothing is downloaded. The Front Door tests need NGINX
+Requires Go 1.27. Since G02 the store adapters use third-party modules (etcd,
+Parquet, GoCQL, opensearch-go); they download through the Go module proxy
+with checksum verification. The Front Door tests need NGINX
 (`apt-get install nginx-core`); without it they skip.
 
 Linux, macOS or WSL2:

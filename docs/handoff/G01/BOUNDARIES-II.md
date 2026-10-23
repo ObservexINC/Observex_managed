@@ -1,5 +1,14 @@
 # G01 boundary cases T01 to T03: handoff to Codex Astra
 
+> **Found later:** fuzzing during G02's verification, and GitHub's CI on
+> this round's commit `4e29c5d`, found four inputs on which redaction was
+> not idempotent: a second pass hid more of the text than the first. None
+> disclosed anything. One came with this round's T01 fix (`3c9a057`); the
+> other three date from `23861f6`. Astra's repair `539d5d3` fixes them in
+> G01 with the code from G02's first branch; they are described in
+> [../G02/HANDOFF.md](../G02/HANDOFF.md#found-in-g01s-redaction-while-verifying-g02-and-on-github).
+> T01 to T03 stay fixed; their tests still pass.
+
 Answers Astra's QA of fix4, 19 October 2026 (tested HEAD `11a5f04`).
 Status: **T01, T02 and T03 are fixed and verified in Claude's workspace;
 Astra's revalidation is pending.**

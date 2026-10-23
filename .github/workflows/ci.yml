@@ -8,19 +8,23 @@ on:
 permissions:
   contents: read
 
+# Every job runs on Ubuntu 24.04, not ubuntu-latest, so NGINX, OpenSSL and
+# ShellCheck stay at known versions; moving to a newer image is a decision of
+# its own (akash, 22 October 2026). The actions are the major versions that
+# run on Node.js 24 (GitHub removed Node.js 20 on 23 September 2026).
 jobs:
   go:
     name: Go build and tests (Go ${{ matrix.go }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # 1.27 is the target toolchain (T1). 1.24 is the language level in
-        # go.mod and the toolchain in the development workspace.
-        go: ["1.27.x", "1.24.x"]
+        # 1.27 is the toolchain (T1) and the language level in go.mod. The
+        # 1.24 leg ended in G02, when go.mod moved to 1.27 (ADR 0002).
+        go: ["1.27.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -33,7 +37,7 @@ jobs:
         run: make fuzz FUZZTIME=30s
       - name: Preserve failing fuzz inputs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-corpus-go-${{ matrix.go }}
           path: internal/**/testdata/fuzz/**
@@ -42,12 +46,12 @@ jobs:
 
   checks:
     name: Lint, vulnerabilities, secrets, licences, schemas
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.x"
           check-latest: true
@@ -72,14 +76,55 @@ jobs:
           sudo apt-get install -y -q shellcheck
           make shell-check
 
+  engines:
+    name: Store adapters against Cassandra and OpenSearch
+    runs-on: ubuntu-24.04
+    # Plain HTTP and no authentication here: the tarball rig
+    # (test/rig/engines-tarball.sh) and Astra's compose run exercise
+    # PasswordAuthenticator, HTTPS and basic authentication.
+    services:
+      cassandra:
+        image: cassandra:5.0.9
+        env:
+          MAX_HEAP_SIZE: 1G
+          HEAP_NEWSIZE: 256M
+        ports:
+          - 9042:9042
+        options: >-
+          --health-cmd "cqlsh -e 'describe keyspaces'"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+      opensearch:
+        image: opensearchproject/opensearch:3.9.0
+        env:
+          discovery.type: single-node
+          DISABLE_SECURITY_PLUGIN: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: -Xms1g -Xmx1g
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s --health-timeout 10s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+          check-latest: true
+      - name: Contract suites and adapter tests on the real engines
+        env:
+          OBSERVEX_TEST_CASSANDRA: 127.0.0.1:9042
+          OBSERVEX_TEST_OPENSEARCH: http://127.0.0.1:9200
+        run: make test-engines
+
   node-install:
     name: Node tarball install test (systemd)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.27.x"
           check-latest: true
